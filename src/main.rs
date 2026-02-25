@@ -18,7 +18,6 @@ use egui_sdl2_gl::sdl2::event::Event;
 use egui_sdl2_gl::sdl2::video::SwapInterval;
 use egui_sdl2_gl::{DpiScaling, ShaderVersion};
 use config::parse_hex_color;
-use raw_window_handle::HasWindowHandle;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const WINDOW_HEIGHT: u32 = 28;
@@ -105,44 +104,9 @@ fn main() {
         .expect("Failed to create window");
 
     let _gl_context = window.gl_create_context().expect("Failed to create GL context");
-    
-    // Set X11 window type to dock for proper cursor and focus behavior
-    unsafe {
-        let display = x11::xlib::XOpenDisplay(std::ptr::null());
-        if !display.is_null() {
-            if let Ok(handle) = window.window_handle() {
-                use raw_window_handle::RawWindowHandle;
-                if let RawWindowHandle::Xlib(xlib_window) = handle.as_raw() {
-                    let xwindow = xlib_window.window;
-                    
-                    let atom_type = x11::xlib::XInternAtom(
-                        display,
-                        b"_NET_WM_WINDOW_TYPE\0".as_ptr() as *const i8,
-                        x11::xlib::False,
-                    );
-                    let atom_dock = x11::xlib::XInternAtom(
-                        display,
-                        b"_NET_WM_WINDOW_TYPE_DOCK\0".as_ptr() as *const i8,
-                        x11::xlib::False,
-                    );
-                    
-                    x11::xlib::XChangeProperty(
-                        display,
-                        xwindow,
-                        atom_type,
-                        x11::xlib::XA_ATOM,
-                        32,
-                        x11::xlib::PropModeReplace,
-                        &atom_dock as *const u64 as *const u8,
-                        1,
-                    );
-                    x11::xlib::XFlush(display);
-                }
-            }
-            x11::xlib::XCloseDisplay(display);
-        }
-    }
-    
+
+    sdl_context.mouse().show_cursor(false);
+
     let shader_ver = ShaderVersion::Default;
 
     let (mut painter, mut egui_state) = egui_sdl2_gl::with_sdl2(

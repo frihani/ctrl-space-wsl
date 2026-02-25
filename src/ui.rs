@@ -171,7 +171,12 @@ impl LauncherApp {
 
         egui::CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
             ui.style_mut().visuals.text_cursor.blink = false;
-            
+            ui.style_mut().interaction.selectable_labels = false;
+
+            if ctx.input(|i| i.pointer.any_click()) {
+                self.request_focus = true;
+            }
+
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
 
@@ -182,11 +187,11 @@ impl LauncherApp {
                         .color(self.prompt_color));
                     return;
                 }
-                
+
                 let prompt_width = ui.available_width() / 4.0;
 
                 let text_edit_id = egui::Id::new("query_input");
-                
+
                 let cursor_at_end = if let Some(state) = TextEdit::load_state(ctx, text_edit_id) {
                     if let Some(range) = state.cursor.char_range() {
                         range.primary.index >= self.query.len()
@@ -196,10 +201,10 @@ impl LauncherApp {
                 } else {
                     true
                 };
-                
+
                 let right_pressed = ctx.input(|i| i.key_pressed(Key::ArrowRight));
                 let left_pressed = ctx.input(|i| i.key_pressed(Key::ArrowLeft));
-                
+
                 if right_pressed && cursor_at_end && !self.cursor_in_results && results.len() > 1 {
                     self.cursor_in_results = true;
                     self.selected = 1;
@@ -221,9 +226,9 @@ impl LauncherApp {
                         self.cursor_in_results = false;
                     }
                 }
-                
+
                 let keep_cursor_at_end = self.cursor_in_results;
-                
+
                 let mut text_edit = TextEdit::singleline(&mut self.query)
                     .id(text_edit_id)
                     .font(FontId::monospace(self.font_size))
@@ -247,13 +252,13 @@ impl LauncherApp {
                     self.first_frame = false;
                     self.request_focus = false;
                 }
-                
+
                 if response.changed() {
                     self.cursor_in_results = false;
                     self.selected = 0;
                     self.scroll_offset = 0;
                 }
-                
+
                 if keep_cursor_at_end {
                     let cursor = CCursor::new(self.query.len());
                     let selection = CCursorRange::one(cursor);
@@ -275,11 +280,11 @@ impl LauncherApp {
                 let char_width = ctx.fonts_mut(|f| f.glyph_width(&font_id, 'M'));
                 for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
                     let text_width = char_width * app.name.len() as f32 + padding;
-                    
+
                     if current_x + text_width > max_x && !visible_indices.is_empty() {
                         break;
                     }
-                    
+
                     visible_indices.push(i);
                     current_x += text_width;
                 }
