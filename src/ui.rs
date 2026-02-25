@@ -1,5 +1,5 @@
-use eframe::egui::{self, Color32, FontId, Key, TextEdit, text_selection::CCursorRange};
-use eframe::egui::text::{CCursor, LayoutJob, TextFormat};
+use egui::{Color32, FontId, Key, TextEdit, text_selection::CCursorRange};
+use egui::text::{CCursor, LayoutJob, TextFormat};
 
 use crate::config::{parse_hex_color, Config};
 use crate::filter::{filter_apps, FilteredApp};
@@ -54,6 +54,7 @@ pub struct LauncherApp {
     delete_confirm: Option<String>,
     cursor_in_results: bool,
     close_at: Option<std::time::Instant>,
+    hide_window: bool,
 }
 
 impl LauncherApp {
@@ -86,7 +87,16 @@ impl LauncherApp {
             delete_confirm: None,
             cursor_in_results: false,
             close_at: None,
+            hide_window: false,
         }
+    }
+
+    pub fn should_hide(&self) -> bool {
+        self.hide_window
+    }
+
+    pub fn should_quit(&self) -> bool {
+        self.should_close || self.close_at.map(|t| std::time::Instant::now() >= t).unwrap_or(false)
     }
 
     fn launch_selected(&mut self, results: &[FilteredApp]) {
@@ -99,6 +109,7 @@ impl LauncherApp {
             return;
         };
 
+        self.hide_window = true;
         let result = launcher::launch_command(&command);
         if result.success && !result.command.is_empty() {
             self.frequency.increment(&result.command);
@@ -113,16 +124,8 @@ impl LauncherApp {
             self.request_focus = true;
         }
     }
-}
 
-impl eframe::App for LauncherApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
-        if self.first_frame {
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(0.0, 0.0)));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        }
-
+    pub fn update(&mut self, ctx: &egui::Context) {
         let results = filter_apps(&self.apps, &self.query, &self.frequency);
         if self.selected >= results.len() {
             self.selected = results.len().saturating_sub(1);
@@ -158,18 +161,7 @@ impl eframe::App for LauncherApp {
             }
         }
 
-        if let Some(close_at) = self.close_at {
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(0.0, 0.0)));
-            if std::time::Instant::now() >= close_at {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            } else {
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
-            }
-            return;
-        }
-
-        if self.should_close {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        if self.close_at.is_some() {
             return;
         }
 
@@ -280,10 +272,9 @@ impl eframe::App for LauncherApp {
                 let padding = 12.0;
 
                 let mut visible_indices = Vec::new();
+                let char_width = ctx.fonts_mut(|f| f.glyph_width(&font_id, 'M'));
                 for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
-                    let text_width = ui.fonts(|f| {
-                        f.glyph_width(&font_id, 'M') * app.name.len() as f32
-                    }) + padding;
+                    let text_width = char_width * app.name.len() as f32 + padding;
                     
                     if current_x + text_width > max_x && !visible_indices.is_empty() {
                         break;

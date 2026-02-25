@@ -101,7 +101,7 @@ pub fn confirm_overwrite() -> bool {
     false
 }
 
-pub fn parse_hex_color(hex: &str) -> Option<eframe::egui::Color32> {
+pub fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
     let hex = hex.strip_prefix('#')?;
     if hex.len() != 6 {
         return None;
@@ -109,5 +109,5 @@ pub fn parse_hex_color(hex: &str) -> Option<eframe::egui::Color32> {
     let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
     let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
     let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    Some(eframe::egui::Color32::from_rgb(r, g, b))
+    Some(egui::Color32::from_rgb(r, g, b))
 }
