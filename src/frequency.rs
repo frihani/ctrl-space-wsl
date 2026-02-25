@@ -50,6 +50,10 @@ impl Frequency {
         }
         Ok(())
     }
+
+    pub fn commands(&self) -> Vec<String> {
+        self.counts.keys().cloned().collect()
+    }
 }
 
 fn data_path() -> PathBuf {

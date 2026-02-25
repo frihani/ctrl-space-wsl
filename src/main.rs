@@ -26,7 +26,12 @@ fn main() {
     };
     let config = Config::load();
     let mut frequency = Frequency::load();
-    let apps = app_discovery::discover_apps();
+    let mut apps = app_discovery::discover_apps();
+    for cmd in frequency.commands() {
+        if !apps.contains(&cmd) {
+            apps.push(cmd);
+        }
+    }
     let ui = Ui::new(config);
     if let Err(e) = ui.enter() {
         eprintln!("Failed to enter UI: {}", e);

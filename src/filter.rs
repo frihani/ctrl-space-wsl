@@ -16,7 +16,8 @@ pub fn filter_apps(
     max_results: usize,
 ) -> Vec<FilteredApp> {
     let matcher = SkimMatcherV2::default();
-    let mut results: Vec<FilteredApp> = if query.is_empty() {
+    let normalized_query: String = query.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut results: Vec<FilteredApp> = if normalized_query.is_empty() {
         apps.iter()
             .map(|name| {
                 let freq_score = frequency.get(name) as i64 * 100;
@@ -30,7 +31,7 @@ pub fn filter_apps(
     } else {
         apps.iter()
             .filter_map(|name| {
-                matcher.fuzzy_indices(name, query).map(|(score, indices)| {
+                matcher.fuzzy_indices(name, &normalized_query).map(|(score, indices)| {
                     let freq_score = frequency.get(name) as i64 * 100;
                     FilteredApp {
                         name: name.clone(),
