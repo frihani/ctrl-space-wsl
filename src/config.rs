@@ -71,7 +71,6 @@ fn config_path() -> PathBuf {
 pub enum CreateConfigResult {
     Created(PathBuf),
     NeedsConfirmation(PathBuf),
-    Cancelled,
 }
 
 pub fn create_default_config(force: bool) -> std::io::Result<CreateConfigResult> {
@@ -102,7 +101,7 @@ pub fn confirm_overwrite() -> bool {
     false
 }
 
-pub fn parse_hex_color(hex: &str) -> Option<crossterm::style::Color> {
+pub fn parse_hex_color(hex: &str) -> Option<eframe::egui::Color32> {
     let hex = hex.strip_prefix('#')?;
     if hex.len() != 6 {
         return None;
@@ -110,5 +109,5 @@ pub fn parse_hex_color(hex: &str) -> Option<crossterm::style::Color> {
     let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
     let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
     let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    Some(crossterm::style::Color::Rgb { r, g, b })
+    Some(eframe::egui::Color32::from_rgb(r, g, b))
 }

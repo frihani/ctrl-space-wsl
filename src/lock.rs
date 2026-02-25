@@ -1,27 +1,27 @@
-use fs2::FileExt;
-use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::fs;
+use std::process;
 
 use crate::config::config_dir;
 
-pub struct SingleInstance {
-    _file: File,
-}
-
-impl SingleInstance {
-    pub fn acquire() -> io::Result<Option<Self>> {
-        let dir = config_dir();
-        fs::create_dir_all(&dir)?;
-        let lock_path = dir.join("lock");
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock_path)?;
-        match file.try_lock_exclusive() {
-            Ok(()) => Ok(Some(Self { _file: file })),
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(None),
-            Err(e) => Err(e),
+pub fn kill_others() {
+    let my_pid = process::id();
+    let my_exe = fs::read_link("/proc/self/exe").ok();
+    
+    std::thread::spawn(move || {
+        let pid_path = config_dir().join("pid");
+        
+        if let Ok(old_pid_str) = fs::read_to_string(&pid_path) {
+            if let Ok(old_pid) = old_pid_str.trim().parse::<u32>() {
+                if old_pid != my_pid {
+                    let old_exe = fs::read_link(format!("/proc/{}/exe", old_pid)).ok();
+                    if old_exe == my_exe {
+                        unsafe { libc::kill(old_pid as i32, libc::SIGTERM); }
+                    }
+                }
+            }
         }
-    }
+        
+        let _ = fs::create_dir_all(config_dir());
+        let _ = fs::write(&pid_path, my_pid.to_string());
+    });
 }
