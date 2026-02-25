@@ -32,9 +32,10 @@ pub fn filter_apps(
             .filter_map(|name| {
                 matcher.fuzzy_indices(name, &normalized_query).map(|(score, indices)| {
                     let freq_score = frequency.get(name) as i64 * 100;
+                    let exact_bonus = if name == &normalized_query { 1_000_000 } else { 0 };
                     FilteredApp {
                         name: name.clone(),
-                        score: score + freq_score,
+                        score: score + freq_score + exact_bonus,
                         match_indices: indices,
                     }
                 })
