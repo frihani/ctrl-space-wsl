@@ -11,7 +11,6 @@ use crate::config::{parse_hex_color, Config};
 use crate::filter::FilteredApp;
 
 pub struct Ui {
-    config: Config,
     fg: Color,
     bg: Color,
     sel_fg: Color,
@@ -28,7 +27,7 @@ impl Ui {
         let sel_bg = parse_hex_color(&config.appearance.selection_bg).unwrap_or(Color::Blue);
         let match_hl = parse_hex_color(&config.appearance.match_highlight).unwrap_or(Color::Green);
         let prompt_color = parse_hex_color(&config.appearance.prompt_color).unwrap_or(Color::Magenta);
-        Self { config, fg, bg, sel_fg, sel_bg, match_hl, prompt_color }
+        Self { fg, bg, sel_fg, sel_bg, match_hl, prompt_color }
     }
 
     pub fn enter(&self) -> io::Result<()> {
@@ -45,16 +44,35 @@ impl Ui {
         Ok(())
     }
 
-    pub fn render(&self, query: &str, results: &[FilteredApp], selected: usize) -> io::Result<()> {
+    pub fn render(&self, query: &str, results: &[FilteredApp], selected: usize, scroll_offset: usize) -> io::Result<usize> {
         let mut stdout = io::stdout();
         let (cols, _) = terminal::size()?;
+        let cols = cols as usize;
+        let prompt_width = cols / 3;
+        let suggestions_start = prompt_width;
         execute!(stdout, MoveTo(0, 0))?;
-        execute!(stdout, SetBackgroundColor(self.bg), SetForegroundColor(self.prompt_color))?;
-        let input_line = format!("{}", query);
-        let padding = " ".repeat((cols as usize).saturating_sub(input_line.len()));
-        execute!(stdout, Print(&input_line), Print(&padding))?;
-        for (i, app) in results.iter().enumerate() {
-            execute!(stdout, MoveTo(0, (i + 1) as u16))?;
+        execute!(stdout, SetBackgroundColor(self.bg))?;
+        execute!(stdout, SetForegroundColor(self.prompt_color))?;
+        let padding = " ";
+        execute!(stdout, Print(padding))?;
+        let available_prompt_width = prompt_width.saturating_sub(2);
+        let display_query = if query.len() > available_prompt_width {
+            &query[query.len() - available_prompt_width..]
+        } else {
+            query
+        };
+        execute!(stdout, Print(display_query))?;
+        let prompt_padding = " ".repeat(available_prompt_width.saturating_sub(display_query.len()) + 1);
+        execute!(stdout, Print(&prompt_padding))?;
+        let mut x = suggestions_start;
+        let padding = " ";
+        let mut last_visible = scroll_offset;
+        for (i, app) in results.iter().enumerate().skip(scroll_offset) {
+            let entry_len = app.name.len() + 2;
+            if x + entry_len > cols {
+                break;
+            }
+            last_visible = i;
             let is_selected = i == selected;
             let (fg, bg) = if is_selected {
                 (self.sel_fg, self.sel_bg)
@@ -62,67 +80,35 @@ impl Ui {
                 (self.fg, self.bg)
             };
             execute!(stdout, SetBackgroundColor(bg), SetForegroundColor(fg))?;
-            let mut line = String::new();
+            execute!(stdout, Print(padding))?;
             for (ci, ch) in app.name.chars().enumerate() {
                 if app.match_indices.contains(&ci) {
-                    line.push_str(&format!(
-                        "\x1b[38;2;{};{};{}m{}\x1b[38;2;{};{};{}m",
-                        color_r(self.match_hl), color_g(self.match_hl), color_b(self.match_hl),
-                        ch,
-                        color_r(fg), color_g(fg), color_b(fg)
-                    ));
+                    execute!(stdout, SetForegroundColor(self.match_hl))?;
+                    execute!(stdout, Print(ch))?;
+                    execute!(stdout, SetForegroundColor(fg))?;
                 } else {
-                    line.push(ch);
+                    execute!(stdout, Print(ch))?;
                 }
             }
-            let visible_len = app.name.len();
-            let padding = " ".repeat((cols as usize).saturating_sub(visible_len));
-            execute!(stdout, Print(&line), Print(&padding))?;
+            execute!(stdout, Print(padding))?;
+            x += app.name.len() + 2;
         }
-        let total_lines = 1 + results.len();
-        let max_lines = 1 + self.config.appearance.max_results;
-        for i in total_lines..max_lines {
-            execute!(stdout, MoveTo(0, i as u16))?;
+        if x < cols {
             execute!(stdout, SetBackgroundColor(self.bg), SetForegroundColor(self.fg))?;
-            let padding = " ".repeat(cols as usize);
+            let padding = " ".repeat(cols - x);
             execute!(stdout, Print(&padding))?;
         }
         execute!(stdout, ResetColor)?;
         stdout.flush()?;
-        Ok(())
-    }
-
-    pub fn max_results(&self) -> usize {
-        self.config.appearance.max_results
-    }
-}
-
-fn color_r(c: Color) -> u8 {
-    match c {
-        Color::Rgb { r, .. } => r,
-        _ => 255,
-    }
-}
-
-fn color_g(c: Color) -> u8 {
-    match c {
-        Color::Rgb { g, .. } => g,
-        _ => 255,
-    }
-}
-
-fn color_b(c: Color) -> u8 {
-    match c {
-        Color::Rgb { b, .. } => b,
-        _ => 255,
+        Ok(last_visible)
     }
 }
 
 pub enum Action {
     Char(char),
     Backspace,
-    Up,
-    Down,
+    Left,
+    Right,
     Enter,
     Escape,
     None,
@@ -136,8 +122,8 @@ pub fn read_key() -> io::Result<Action> {
                     KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => Action::Escape,
                     KeyCode::Char(c) => Action::Char(c),
                     KeyCode::Backspace => Action::Backspace,
-                    KeyCode::Up => Action::Up,
-                    KeyCode::Down => Action::Down,
+                    KeyCode::Left => Action::Left,
+                    KeyCode::Right => Action::Right,
                     KeyCode::Enter => Action::Enter,
                     KeyCode::Esc => Action::Escape,
                     _ => Action::None,

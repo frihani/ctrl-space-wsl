@@ -13,7 +13,6 @@ pub fn filter_apps(
     apps: &[String],
     query: &str,
     frequency: &Frequency,
-    max_results: usize,
 ) -> Vec<FilteredApp> {
     let matcher = SkimMatcherV2::default();
     let normalized_query: String = query.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -43,6 +42,5 @@ pub fn filter_apps(
             .collect()
     };
     results.sort_by(|a, b| b.score.cmp(&a.score));
-    results.truncate(max_results);
     results
 }

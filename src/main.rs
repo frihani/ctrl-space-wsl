@@ -74,16 +74,26 @@ fn main() {
     }
     let mut query = String::new();
     let mut selected: usize = 0;
-    let max_results = ui.max_results();
+    let mut scroll_offset: usize = 0;
+    let mut last_visible: usize = 0;
     loop {
-        let results = filter_apps(&apps, &query, &frequency, max_results);
+        let results = filter_apps(&apps, &query, &frequency);
         if selected >= results.len() {
             selected = results.len().saturating_sub(1);
         }
-        if let Err(e) = ui.render(&query, &results, selected) {
-            let _ = ui.leave();
-            eprintln!("Render error: {}", e);
-            std::process::exit(1);
+        if scroll_offset > selected {
+            scroll_offset = selected;
+        }
+        if selected > last_visible && selected > scroll_offset {
+            scroll_offset = selected;
+        }
+        match ui.render(&query, &results, selected, scroll_offset) {
+            Ok(lv) => last_visible = lv,
+            Err(e) => {
+                let _ = ui.leave();
+                eprintln!("Render error: {}", e);
+                std::process::exit(1);
+            }
         }
         let action = match ui::read_key() {
             Ok(a) => a,
@@ -93,17 +103,25 @@ fn main() {
             Action::Char(c) => {
                 query.push(c);
                 selected = 0;
+                scroll_offset = 0;
             }
             Action::Backspace => {
                 query.pop();
                 selected = 0;
+                scroll_offset = 0;
             }
-            Action::Up => {
+            Action::Left => {
                 selected = selected.saturating_sub(1);
+                if selected < scroll_offset {
+                    scroll_offset = selected;
+                }
             }
-            Action::Down => {
+            Action::Right => {
                 if selected + 1 < results.len() {
                     selected += 1;
+                    if selected > last_visible {
+                        scroll_offset += 1;
+                    }
                 }
             }
             Action::Enter => {
