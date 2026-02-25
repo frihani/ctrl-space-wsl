@@ -6,6 +6,8 @@ mod launcher;
 mod lock;
 mod ui;
 
+use std::env;
+
 use config::Config;
 use filter::filter_apps;
 use frequency::Frequency;
@@ -13,6 +15,39 @@ use lock::SingleInstance;
 use ui::{Action, Ui};
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.iter().any(|a| a == "--init-config") {
+        match config::create_default_config(false) {
+            Ok(config::CreateConfigResult::Created(path)) => {
+                println!("Created config file: {}", path.display());
+                std::process::exit(0);
+            }
+            Ok(config::CreateConfigResult::NeedsConfirmation(path)) => {
+                if config::confirm_overwrite() {
+                    match config::create_default_config(true) {
+                        Ok(config::CreateConfigResult::Created(p)) => {
+                            println!("Created config file: {}", p.display());
+                            std::process::exit(0);
+                        }
+                        _ => {
+                            eprintln!("Failed to create config");
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    println!("Cancelled. Config file unchanged: {}", path.display());
+                    std::process::exit(0);
+                }
+            }
+            Ok(config::CreateConfigResult::Cancelled) => {
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("Failed to create config: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
     let _lock = match SingleInstance::acquire() {
         Ok(Some(lock)) => lock,
         Ok(None) => {

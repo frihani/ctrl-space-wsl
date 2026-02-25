@@ -1,7 +1,8 @@
 use fs2::FileExt;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io;
-use std::path::PathBuf;
+
+use crate::config::config_dir;
 
 pub struct SingleInstance {
     _file: File,
@@ -9,7 +10,9 @@ pub struct SingleInstance {
 
 impl SingleInstance {
     pub fn acquire() -> io::Result<Option<Self>> {
-        let lock_path = lock_path();
+        let dir = config_dir();
+        fs::create_dir_all(&dir)?;
+        let lock_path = dir.join("lock");
         let file = OpenOptions::new()
             .write(true)
             .create(true)
@@ -21,8 +24,4 @@ impl SingleInstance {
             Err(e) => Err(e),
         }
     }
-}
-
-fn lock_path() -> PathBuf {
-    PathBuf::from("/tmp/ctrl-space-wsl.lock")
 }
