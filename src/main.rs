@@ -75,8 +75,8 @@ fn main() {
                 };
                 if let Some(cmd) = command {
                     let result = launcher::launch_command(&cmd);
-                    if result.success && !result.program.is_empty() {
-                        frequency.increment(&result.program);
+                    if result.success && !result.command.is_empty() {
+                        frequency.increment(&result.command);
                         let _ = frequency.save();
                     }
                 }

@@ -3,13 +3,13 @@ use std::process::{Command, Stdio};
 
 pub struct LaunchResult {
     pub success: bool,
-    pub program: String,
+    pub command: String,
 }
 
 pub fn launch_command(input: &str) -> LaunchResult {
     let parts: Vec<&str> = input.split_whitespace().collect();
     if parts.is_empty() {
-        return LaunchResult { success: false, program: String::new() };
+        return LaunchResult { success: false, command: String::new() };
     }
     let program = parts[0];
     let args = &parts[1..];
@@ -24,8 +24,9 @@ pub fn launch_command(input: &str) -> LaunchResult {
             Ok(())
         });
     }
+    let normalized_cmd = parts.join(" ");
     match cmd.spawn() {
-        Ok(_) => LaunchResult { success: true, program: program.to_string() },
-        Err(_) => LaunchResult { success: false, program: program.to_string() },
+        Ok(_) => LaunchResult { success: true, command: normalized_cmd },
+        Err(_) => LaunchResult { success: false, command: String::new() },
     }
 }
