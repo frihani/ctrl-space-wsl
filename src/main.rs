@@ -13,10 +13,24 @@ use frequency::Frequency;
 use lock::kill_others;
 use ui::LauncherApp;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const WINDOW_HEIGHT: f32 = 28.0;
+
+fn print_info() {
+    let dir = config::config_dir();
+    println!("ctrl-space-wsl\n");
+    println!("Version:          v{}", VERSION);
+    println!("Config:           {}", dir.join("config.toml").display());
+    println!("Cache:            {}", dir.join("freq.txt").display());
+    println!("Logs:             {}", dir.join("ctrl-space-wsl.log").display());
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    if args.iter().any(|a| a == "--info" || a == "-i") {
+        print_info();
+        std::process::exit(0);
+    }
     if args.iter().any(|a| a == "--init-config") {
         match config::create_default_config(false) {
             Ok(config::CreateConfigResult::Created(path)) => {
