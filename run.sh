@@ -9,14 +9,13 @@
 #   background = "#21222C"
 #   selection_fg = "#F8F8F2"
 #   selection_bg = "#6272A4"
-#   match_highlight = "#50FA7B"
+#   match_highlight = "#8be9fd"
 #   prompt_color = "#BD93F9"
 #   font_family = "Monospace"
 #   font_size = 10
-#   max_results = 10
 #
-# Frequency data: ~/.local/share/ctrl-space-wsl/freq.txt
-# Lock file: /tmp/ctrl-space-wsl.lock
+# Frequency data: ~/.config/ctrl-space-wsl/freq.txt
+# Lock file (PID): ~/.config/ctrl-space-wsl/pid
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 exec "$SCRIPT_DIR/target/release/ctrl-space-wsl"

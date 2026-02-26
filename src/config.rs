@@ -101,6 +101,7 @@ pub fn confirm_overwrite() -> bool {
     false
 }
 
+#[cfg(feature = "sdl2-backend")]
 pub fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
     let hex = hex.strip_prefix('#')?;
     if hex.len() != 6 {

@@ -23,6 +23,21 @@ cargo build --release
 cp target/release/ctrl-space-wsl ~/.local/bin/
 ```
 
+### Backends
+
+Two backends are available:
+
+- **x11** (default) - Lightweight, minimal dependencies
+- **sdl2** - Uses egui/SDL2 for rendering
+
+```bash
+# Build with X11 backend (default)
+cargo build --release
+
+# Build with SDL2 backend
+cargo build --release --no-default-features --features sdl2-backend
+```
+
 Ensure `~/.local/bin` is in your PATH.
 
 ## Usage
