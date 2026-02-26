@@ -1,5 +1,5 @@
 use std::fs;
-use std::process;
+use std::process::{self, Command};
 
 use crate::config::config_dir;
 
@@ -15,7 +15,9 @@ pub fn kill_others() {
                 if old_pid != my_pid {
                     let old_exe = fs::read_link(format!("/proc/{}/exe", old_pid)).ok();
                     if old_exe == my_exe {
-                        unsafe { libc::kill(old_pid as i32, libc::SIGTERM); }
+                        let _ = Command::new("kill")
+                            .args(["-TERM", &old_pid.to_string()])
+                            .output();
                     }
                 }
             }

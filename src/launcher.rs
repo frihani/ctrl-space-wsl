@@ -22,9 +22,9 @@ pub fn launch_command(input: &str) -> LaunchResult {
         return LaunchResult { success: false, command: String::new() };
     }
     let normalized_cmd = parts.join(" ");
-    let shell_cmd = format!("{} &", normalized_cmd);
+    let shell_cmd = format!("nohup {} >/dev/null 2>&1 &", normalized_cmd);
     let mut cmd = Command::new("bash");
-    cmd.args(["-l", "-c", &shell_cmd]);
+    cmd.args(["-c", &shell_cmd]);
     
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/dev".to_string());
     cmd.current_dir(&home);
