@@ -49,7 +49,7 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) {
 
     let _ = video_subsystem.gl_set_swap_interval(SwapInterval::VSync);
 
-    let clear_color = parse_hex_color(&config.appearance.background).unwrap_or(egui::Color32::from_rgb(33, 34, 44));
+    let clear_color: egui::Color32 = parse_hex_color(&config.appearance.background).map(Into::into).unwrap_or(egui::Color32::from_rgb(33, 34, 44));
 
     let mut app = LauncherApp::new(config, apps, frequency);
     let mut window_hidden = false;

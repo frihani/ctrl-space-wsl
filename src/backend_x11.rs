@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::fs;
 
-use crate::config::Config;
+use crate::config::{Config, Rgb, parse_hex_color};
 use crate::frequency::Frequency;
 use crate::filter::{filter_apps, FilteredApp};
 use crate::launcher;
@@ -11,8 +12,19 @@ use x11rb::protocol::Event;
 use x11rb::wrapper::ConnectionExt as _;
 
 use fontdue::{Font, FontSettings};
+use xkbcommon::xkb;
+use fontconfig::Fontconfig;
 
 const WINDOW_HEIGHT: u16 = 28;
+
+struct CachedColors {
+    bg: Rgb,
+    fg: Rgb,
+    sel_bg: Rgb,
+    sel_fg: Rgb,
+    match_hl: Rgb,
+    prompt: Rgb,
+}
 
 struct App {
     config: Config,
@@ -21,16 +33,54 @@ struct App {
     query: String,
     cursor_pos: usize,
     selected: usize,
+    scroll_offset: usize,
+    last_visible: usize,
+    page_size: usize,
     cursor_in_results: bool,
     delete_confirm: Option<String>,
     font: Font,
     glyph_cache: HashMap<(char, u32), (fontdue::Metrics, Vec<u8>)>,
+    colors: CachedColors,
+    xkb_state: xkb::State,
+}
+
+fn load_font(font_family: &str) -> Option<Font> {
+    let fc = Fontconfig::new()?;
+    let font_match = fc.find(font_family, None)?;
+    let path = font_match.path;
+    let data = fs::read(&path).ok()?;
+    Font::from_bytes(data, FontSettings::default()).ok()
+}
+
+fn create_xkb_state() -> Result<xkb::State, Box<dyn std::error::Error>> {
+    let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+    let keymap = xkb::Keymap::new_from_names(
+        &context,
+        "",
+        "",
+        "",
+        "",
+        None,
+        xkb::KEYMAP_COMPILE_NO_FLAGS,
+    ).ok_or("Failed to create XKB keymap")?;
+    
+    let state = xkb::State::new(&keymap);
+    Ok(state)
 }
 
 impl App {
-    fn new(config: Config, frequency: Frequency, apps: Vec<String>) -> Self {
-        let font_data = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
-        let font = Font::from_bytes(font_data as &[u8], FontSettings::default()).unwrap();
+    fn new(config: Config, frequency: Frequency, apps: Vec<String>, xkb_state: xkb::State) -> Self {
+        let font = load_font(&config.appearance.font_family)
+            .unwrap_or_else(|| panic!("Font '{}' not found", config.appearance.font_family));
+        
+        let colors = CachedColors {
+            bg: parse_hex_color(&config.appearance.background).unwrap_or(Rgb(33, 34, 44)),
+            fg: parse_hex_color(&config.appearance.foreground).unwrap_or(Rgb(248, 248, 242)),
+            sel_bg: parse_hex_color(&config.appearance.selection_bg).unwrap_or(Rgb(98, 114, 164)),
+            sel_fg: parse_hex_color(&config.appearance.selection_fg).unwrap_or(Rgb(248, 248, 242)),
+            match_hl: parse_hex_color(&config.appearance.match_highlight).unwrap_or(Rgb(139, 233, 253)),
+            prompt: parse_hex_color(&config.appearance.prompt_color).unwrap_or(Rgb(189, 147, 249)),
+        };
         
         Self {
             config,
@@ -39,25 +89,28 @@ impl App {
             query: String::new(),
             cursor_pos: 0,
             selected: 0,
+            scroll_offset: 0,
+            last_visible: 0,
+            page_size: 0,
             cursor_in_results: false,
             delete_confirm: None,
             font,
             glyph_cache: HashMap::new(),
+            colors,
+            xkb_state,
         }
     }
 
     fn render(&mut self, width: u16, height: u16) -> Vec<u8> {
         let mut buffer = vec![0u8; width as usize * height as usize * 4];
         
-        let bg = parse_hex_color(&self.config.appearance.background).unwrap_or((33, 34, 44));
+        let bg = self.colors.bg;
         for pixel in buffer.chunks_exact_mut(4) {
             pixel[0] = bg.2; // B
             pixel[1] = bg.1; // G
             pixel[2] = bg.0; // R
             pixel[3] = 255;  // A
         }
-
-        let prompt_color = parse_hex_color(&self.config.appearance.prompt_color).unwrap_or((189, 147, 249));
 
         let dpi_scale = 96.0 / 72.0;
         let font_size = self.config.appearance.font_size as f32 * dpi_scale;
@@ -67,7 +120,7 @@ impl App {
 
         if let Some(ref name) = self.delete_confirm {
             let prompt = format!("Delete '{}'? (y/n)", name);
-            self.draw_text(&mut buffer, width, &prompt, x_offset + char_width, y_offset, prompt_color, &[], prompt_color, font_size);
+            self.draw_text(&mut buffer, width, &prompt, x_offset + char_width, y_offset, self.colors.prompt, &[], self.colors.prompt, font_size);
             return buffer;
         }
 
@@ -76,36 +129,34 @@ impl App {
             self.selected = results.len().saturating_sub(1);
         }
 
-        let fg = parse_hex_color(&self.config.appearance.foreground).unwrap_or((248, 248, 242));
-        let sel_bg = parse_hex_color(&self.config.appearance.selection_bg).unwrap_or((98, 114, 164));
-        let sel_fg = parse_hex_color(&self.config.appearance.selection_fg).unwrap_or((248, 248, 242));
-        let match_hl = parse_hex_color(&self.config.appearance.match_highlight).unwrap_or((139, 233, 253));
-
         let text_before_cursor: String = self.query.chars().take(self.cursor_pos).collect();
         let text_after_cursor: String = self.query.chars().skip(self.cursor_pos).collect();
         
-        let before_width = self.draw_text(&mut buffer, width, &text_before_cursor, x_offset + char_width, y_offset, prompt_color, &[], prompt_color, font_size);
+        let before_width = self.draw_text(&mut buffer, width, &text_before_cursor, x_offset + char_width, y_offset, self.colors.prompt, &[], self.colors.prompt, font_size);
         
         let cursor_x = x_offset + char_width + before_width - 1;
-        let cursor_height = 18;
-        let cursor_y = y_offset - font_size as i32 + 2 - 3;
-        self.fill_rect(&mut buffer, width, cursor_x, cursor_y, 2, cursor_height, prompt_color);
+        let cursor_height = (font_size * 1.2) as i32;
+        let cursor_y = y_offset - font_size as i32 + 2;
+        self.fill_rect(&mut buffer, width, cursor_x, cursor_y, 2, cursor_height, self.colors.prompt);
         
         let after_start = cursor_x + 3;
-        self.draw_text(&mut buffer, width, &text_after_cursor, after_start, y_offset, prompt_color, &[], prompt_color, font_size);
+        self.draw_text(&mut buffer, width, &text_after_cursor, after_start, y_offset, self.colors.prompt, &[], self.colors.prompt, font_size);
         
         x_offset += (width as i32 / 4).saturating_sub(x_offset) + 8;
 
-        for (i, app) in results.iter().enumerate() {
+        let mut visible_count = 0;
+        let mut first_visible_idx = None;
+        
+        for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
             if x_offset >= width as i32 {
                 break;
             }
 
             let is_selected = i == self.selected;
             let (text_color, bg_color) = if is_selected {
-                (sel_fg, Some(sel_bg))
+                (self.colors.sel_fg, Some(self.colors.sel_bg))
             } else {
-                (fg, None)
+                (self.colors.fg, None)
             };
 
             let text_width = self.measure_text(&app.name, font_size) + 12;
@@ -114,14 +165,22 @@ impl App {
                 self.fill_rect(&mut buffer, width, x_offset, 0, text_width, height as i32, bg);
             }
 
-            self.draw_text(&mut buffer, width, &app.name, x_offset + 6, y_offset, text_color, &app.match_indices, match_hl, font_size);
+            self.draw_text(&mut buffer, width, &app.name, x_offset + 6, y_offset, text_color, &app.match_indices, self.colors.match_hl, font_size);
             x_offset += text_width;
+            
+            if first_visible_idx.is_none() {
+                first_visible_idx = Some(i);
+            }
+            self.last_visible = i;
+            visible_count += 1;
         }
+        
+        self.page_size = visible_count;
 
         buffer
     }
 
-    fn fill_rect(&self, buffer: &mut [u8], width: u16, x: i32, y: i32, w: i32, h: i32, color: (u8, u8, u8)) {
+    fn fill_rect(&self, buffer: &mut [u8], width: u16, x: i32, y: i32, w: i32, h: i32, color: Rgb) {
         for py in y.max(0)..(y + h).min(buffer.len() as i32 / (width as i32 * 4)) {
             for px in x.max(0)..(x + w).min(width as i32) {
                 let idx = (py as usize * width as usize + px as usize) * 4;
@@ -135,7 +194,7 @@ impl App {
         }
     }
 
-    fn draw_text(&mut self, buffer: &mut [u8], width: u16, text: &str, x: i32, y: i32, color: (u8, u8, u8), match_indices: &[usize], highlight: (u8, u8, u8), font_size: f32) -> i32 {
+    fn draw_text(&mut self, buffer: &mut [u8], width: u16, text: &str, x: i32, y: i32, color: Rgb, match_indices: &[usize], highlight: Rgb, font_size: f32) -> i32 {
         let mut cursor_x = x;
         let px_size = font_size as u32;
 
@@ -206,18 +265,20 @@ impl App {
         true
     }
 
-    fn handle_key(&mut self, keycode: u8, state: u16) -> Option<bool> {
+    fn handle_key(&mut self, keycode: u8) -> Option<bool> {
         let results = filter_apps(&self.apps, &self.query, &self.frequency);
+        let xkb_keycode = xkb::Keycode::new(keycode as u32);
+        let keysym = self.xkb_state.key_get_one_sym(xkb_keycode);
         
         if self.delete_confirm.is_some() {
-            match keycode {
-                29 | 36 => {   // Y or Enter
+            match keysym {
+                xkb::Keysym::y | xkb::Keysym::Y | xkb::Keysym::Return => {
                     if let Some(name) = self.delete_confirm.take() {
                         self.frequency.remove(&name);
                         let _ = self.frequency.save();
                     }
                 }
-                57 | 9 => {    // N or Escape
+                xkb::Keysym::n | xkb::Keysym::N | xkb::Keysym::Escape => {
                     self.delete_confirm = None;
                 }
                 _ => {}
@@ -225,16 +286,15 @@ impl App {
             return None;
         }
 
-        let shift = (state & 1) != 0;
         let cursor_at_end = self.cursor_pos >= self.query.chars().count();
         
-        match keycode {
-            9 => Some(true),   // Escape
-            36 => {            // Enter
+        match keysym {
+            xkb::Keysym::Escape => Some(true),
+            xkb::Keysym::Return | xkb::Keysym::KP_Enter => {
                 self.launch_selected(&results);
                 Some(true)
             }
-            23 => {            // Tab
+            xkb::Keysym::Tab => {
                 if let Some(app) = results.get(self.selected) {
                     self.query = app.name.clone();
                     self.cursor_pos = self.query.chars().count();
@@ -242,7 +302,7 @@ impl App {
                 }
                 None
             }
-            119 => {           // Delete
+            xkb::Keysym::Delete => {
                 if let Some(app) = results.get(self.selected) {
                     if self.frequency.get(&app.name) > 0 {
                         self.delete_confirm = Some(app.name.clone());
@@ -250,7 +310,7 @@ impl App {
                 }
                 None
             }
-            22 => {            // Backspace
+            xkb::Keysym::BackSpace => {
                 if self.cursor_pos > 0 {
                     let idx: usize = self.query.chars().take(self.cursor_pos - 1).map(|c| c.len_utf8()).sum();
                     let end_idx: usize = self.query.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum();
@@ -258,12 +318,17 @@ impl App {
                     self.cursor_pos -= 1;
                     self.cursor_in_results = false;
                     self.selected = 0;
+                    self.scroll_offset = 0;
                 }
                 None
             }
-            113 => {           // Left
+            xkb::Keysym::Left => {
                 if self.cursor_in_results {
                     if self.selected > 0 {
+                        if self.selected == self.scroll_offset && self.scroll_offset > 0 {
+                            let prev_page_start = self.scroll_offset.saturating_sub(self.page_size.max(1));
+                            self.scroll_offset = prev_page_start;
+                        }
                         self.selected -= 1;
                     } else {
                         self.cursor_in_results = false;
@@ -273,10 +338,13 @@ impl App {
                 }
                 None
             }
-            114 => {           // Right
+            xkb::Keysym::Right => {
                 if self.cursor_in_results {
-                    if self.selected + 1 < results.len() {
+                    if self.selected < self.last_visible {
                         self.selected += 1;
+                    } else if self.last_visible + 1 < results.len() {
+                        self.scroll_offset = self.last_visible + 1;
+                        self.selected = self.scroll_offset;
                     }
                 } else if cursor_at_end && results.len() > 1 {
                     self.cursor_in_results = true;
@@ -287,56 +355,60 @@ impl App {
                 None
             }
             _ => {
-                if let Some(ch) = keycode_to_char(keycode, shift) {
+                let s = self.xkb_state.key_get_utf8(xkb_keycode);
+                for ch in s.chars() {
+                    if ch.is_control() {
+                        continue;
+                    }
                     let idx: usize = self.query.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum();
                     self.query.insert(idx, ch);
                     self.cursor_pos += 1;
                     self.cursor_in_results = false;
                     self.selected = 0;
+                    self.scroll_offset = 0;
                 }
                 None
             }
         }
     }
-}
-
-fn keycode_to_char(keycode: u8, shift: bool) -> Option<char> {
-    let ch = match keycode {
-        10..=19 => {
-            let digit = (keycode - 10) as u8;
-            if digit == 0 { b'0' } else { b'0' + digit }
-        }
-        24 => b'q', 25 => b'w', 26 => b'e', 27 => b'r', 28 => b't',
-        29 => b'y', 30 => b'u', 31 => b'i', 32 => b'o', 33 => b'p',
-        38 => b'a', 39 => b's', 40 => b'd', 41 => b'f', 42 => b'g',
-        43 => b'h', 44 => b'j', 45 => b'k', 46 => b'l',
-        52 => b'z', 53 => b'x', 54 => b'c', 55 => b'v', 56 => b'b',
-        57 => b'n', 58 => b'm',
-        65 => b' ',
-        20 => b'-', 21 => b'=',
-        34 => b'[', 35 => b']',
-        47 => b';', 48 => b'\'',
-        59 => b',', 60 => b'.', 61 => b'/',
-        _ => return None,
-    };
     
-    let ch = ch as char;
-    if shift && ch.is_ascii_lowercase() {
-        Some(ch.to_ascii_uppercase())
-    } else {
-        Some(ch)
+    fn update_xkb_state(&mut self, keycode: u8, direction: xkb::KeyDirection) {
+        let xkb_keycode = xkb::Keycode::new(keycode as u32);
+        self.xkb_state.update_key(xkb_keycode, direction);
     }
 }
 
-fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
-    let hex = hex.strip_prefix('#')?;
-    if hex.len() != 6 {
-        return None;
+struct X11Context {
+    conn: x11rb::rust_connection::RustConnection,
+    win_id: u32,
+    gc_id: u32,
+    depth: u8,
+    current_width: u16,
+    current_height: u16,
+}
+
+impl X11Context {
+    fn redraw(&self, pixels: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        let pixmap_id = self.conn.generate_id()?;
+        self.conn.create_pixmap(self.depth, pixmap_id, self.win_id, self.current_width, self.current_height)?;
+        
+        self.conn.put_image(
+            ImageFormat::Z_PIXMAP,
+            pixmap_id,
+            self.gc_id,
+            self.current_width,
+            self.current_height,
+            0, 0,
+            0,
+            self.depth,
+            pixels,
+        )?;
+        
+        self.conn.copy_area(pixmap_id, self.win_id, self.gc_id, 0, 0, 0, 0, self.current_width, self.current_height)?;
+        self.conn.free_pixmap(pixmap_id)?;
+        self.conn.flush()?;
+        Ok(())
     }
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    Some((r, g, b))
 }
 
 pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
@@ -364,6 +436,7 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
             .event_mask(
                 EventMask::EXPOSURE
                     | EventMask::KEY_PRESS
+                    | EventMask::KEY_RELEASE
                     | EventMask::STRUCTURE_NOTIFY
                     | EventMask::FOCUS_CHANGE
             ),
@@ -379,8 +452,6 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
         b"ctrl-space-wsl",
     )?;
 
-    // Set WM_NORMAL_HINTS to specify position
-    // flags: USPosition (1) | PPosition (4) = 5
     let size_hints: [u32; 18] = [
         5,    // flags: USPosition | PPosition
         0,    // x
@@ -459,69 +530,47 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
     )?;
 
     conn.map_window(win_id)?;
+    conn.set_input_focus(InputFocus::PARENT, win_id, x11rb::CURRENT_TIME)?;
     conn.flush()?;
 
-    let mut app = App::new(config, frequency, apps);
-    let mut current_width = width;
-    let mut current_height = WINDOW_HEIGHT;
+    let xkb_state = create_xkb_state()?;
+    let mut app = App::new(config, frequency, apps, xkb_state);
+    
+    let mut ctx = X11Context {
+        conn,
+        win_id,
+        gc_id,
+        depth,
+        current_width: width,
+        current_height: WINDOW_HEIGHT,
+    };
 
     loop {
-        let event = conn.wait_for_event()?;
+        let event = ctx.conn.wait_for_event()?;
         
         match event {
             Event::ConfigureNotify(e) => {
-                current_width = e.width;
-                current_height = e.height;
+                ctx.current_width = e.width;
+                ctx.current_height = e.height;
             }
             Event::Expose(_) => {
-                let pixels = app.render(current_width, current_height);
-                
-                let pixmap_id = conn.generate_id()?;
-                conn.create_pixmap(depth, pixmap_id, win_id, current_width, current_height)?;
-                
-                conn.put_image(
-                    ImageFormat::Z_PIXMAP,
-                    pixmap_id,
-                    gc_id,
-                    current_width,
-                    current_height,
-                    0, 0,
-                    0,
-                    depth,
-                    &pixels,
-                )?;
-                
-                conn.copy_area(pixmap_id, win_id, gc_id, 0, 0, 0, 0, current_width, current_height)?;
-                conn.free_pixmap(pixmap_id)?;
-                conn.flush()?;
+                let pixels = app.render(ctx.current_width, ctx.current_height);
+                ctx.redraw(&pixels)?;
             }
             Event::KeyPress(e) => {
-                if let Some(should_quit) = app.handle_key(e.detail, e.state.into()) {
+                app.update_xkb_state(e.detail, xkb::KeyDirection::Down);
+                
+                if let Some(should_quit) = app.handle_key(e.detail) {
                     if should_quit {
                         break;
                     }
                 }
                 
-                let pixels = app.render(current_width, current_height);
-                
-                let pixmap_id = conn.generate_id()?;
-                conn.create_pixmap(depth, pixmap_id, win_id, current_width, current_height)?;
-                
-                conn.put_image(
-                    ImageFormat::Z_PIXMAP,
-                    pixmap_id,
-                    gc_id,
-                    current_width,
-                    current_height,
-                    0, 0,
-                    0,
-                    depth,
-                    &pixels,
-                )?;
-                
-                conn.copy_area(pixmap_id, win_id, gc_id, 0, 0, 0, 0, current_width, current_height)?;
-                conn.free_pixmap(pixmap_id)?;
-                conn.flush()?;
+                let pixels = app.render(ctx.current_width, ctx.current_height);
+                ctx.redraw(&pixels)?;
+            }
+            Event::KeyRelease(e) => {
+                app.update_xkb_state(e.detail, xkb::KeyDirection::Up);
             }
             _ => {}
         }

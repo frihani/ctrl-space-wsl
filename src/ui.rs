@@ -59,12 +59,12 @@ pub struct LauncherApp {
 
 impl LauncherApp {
     pub fn new(config: Config, apps: Vec<String>, frequency: Frequency) -> Self {
-        let fg = parse_hex_color(&config.appearance.foreground).unwrap_or(Color32::WHITE);
-        let bg = parse_hex_color(&config.appearance.background).unwrap_or(Color32::BLACK);
-        let sel_fg = parse_hex_color(&config.appearance.selection_fg).unwrap_or(Color32::WHITE);
-        let sel_bg = parse_hex_color(&config.appearance.selection_bg).unwrap_or(Color32::BLUE);
-        let match_hl = parse_hex_color(&config.appearance.match_highlight).unwrap_or(Color32::GREEN);
-        let prompt_color = parse_hex_color(&config.appearance.prompt_color).unwrap_or(Color32::from_rgb(189, 147, 249));
+        let fg: Color32 = parse_hex_color(&config.appearance.foreground).map(Into::into).unwrap_or(Color32::WHITE);
+        let bg: Color32 = parse_hex_color(&config.appearance.background).map(Into::into).unwrap_or(Color32::BLACK);
+        let sel_fg: Color32 = parse_hex_color(&config.appearance.selection_fg).map(Into::into).unwrap_or(Color32::WHITE);
+        let sel_bg: Color32 = parse_hex_color(&config.appearance.selection_bg).map(Into::into).unwrap_or(Color32::BLUE);
+        let match_hl: Color32 = parse_hex_color(&config.appearance.match_highlight).map(Into::into).unwrap_or(Color32::GREEN);
+        let prompt_color: Color32 = parse_hex_color(&config.appearance.prompt_color).map(Into::into).unwrap_or(Color32::from_rgb(189, 147, 249));
         let font_size = config.appearance.font_size as f32;
         Self {
             query: String::new(),

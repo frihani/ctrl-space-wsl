@@ -101,8 +101,10 @@ pub fn confirm_overwrite() -> bool {
     false
 }
 
-#[cfg(feature = "sdl2-backend")]
-pub fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
+#[derive(Clone, Copy, Debug)]
+pub struct Rgb(pub u8, pub u8, pub u8);
+
+pub fn parse_hex_color(hex: &str) -> Option<Rgb> {
     let hex = hex.strip_prefix('#')?;
     if hex.len() != 6 {
         return None;
@@ -110,5 +112,12 @@ pub fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
     let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
     let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
     let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    Some(egui::Color32::from_rgb(r, g, b))
+    Some(Rgb(r, g, b))
+}
+
+#[cfg(feature = "sdl2-backend")]
+impl From<Rgb> for egui::Color32 {
+    fn from(rgb: Rgb) -> Self {
+        egui::Color32::from_rgb(rgb.0, rgb.1, rgb.2)
+    }
 }
