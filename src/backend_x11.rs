@@ -13,9 +13,89 @@ use x11rb::protocol::Event;
 use x11rb::wrapper::ConnectionExt as _;
 
 use fontdue::{Font, FontSettings};
-use xkbcommon::xkb;
 
 const WINDOW_HEIGHT: u16 = 28;
+
+mod keysym {
+    pub const BACKSPACE: u32 = 0xff08;
+    pub const TAB: u32 = 0xff09;
+    pub const RETURN: u32 = 0xff0d;
+    pub const ESCAPE: u32 = 0xff1b;
+    pub const DELETE: u32 = 0xffff;
+    pub const LEFT: u32 = 0xff51;
+    pub const RIGHT: u32 = 0xff53;
+    pub const KP_ENTER: u32 = 0xff8d;
+}
+
+struct KeyboardMap {
+    keysyms: Vec<Keysym>,
+    keysyms_per_keycode: u8,
+    min_keycode: u8,
+}
+
+impl KeyboardMap {
+    fn new<C: Connection>(conn: &C, setup: &Setup) -> Result<Self, Box<dyn std::error::Error>> {
+        let min_keycode = setup.min_keycode;
+        let max_keycode = setup.max_keycode;
+        let count = max_keycode - min_keycode + 1;
+        
+        let reply = conn.get_keyboard_mapping(min_keycode, count)?.reply()?;
+        
+        Ok(Self {
+            keysyms: reply.keysyms,
+            keysyms_per_keycode: reply.keysyms_per_keycode,
+            min_keycode,
+        })
+    }
+    
+    fn lookup(&self, keycode: u8, state: u16) -> Option<(u32, Option<char>)> {
+        if keycode < self.min_keycode {
+            return None;
+        }
+        
+        let idx = (keycode - self.min_keycode) as usize * self.keysyms_per_keycode as usize;
+        if idx >= self.keysyms.len() {
+            return None;
+        }
+        
+        let shift = (state & u16::from(KeyButMask::SHIFT)) != 0;
+        let caps = (state & u16::from(KeyButMask::LOCK)) != 0;
+        
+        let col = if shift { 1 } else { 0 };
+        let keysym = self.keysyms.get(idx + col).copied().unwrap_or(0);
+        
+        let keysym = if keysym == 0 {
+            self.keysyms.get(idx).copied().unwrap_or(0)
+        } else {
+            keysym
+        };
+        
+        if keysym == 0 {
+            return None;
+        }
+        
+        let ch = keysym_to_char(keysym, shift ^ caps);
+        Some((keysym, ch))
+    }
+}
+
+fn keysym_to_char(keysym: u32, shift_or_caps: bool) -> Option<char> {
+    if keysym >= 0x20 && keysym <= 0x7e {
+        let mut ch = keysym as u8 as char;
+        if shift_or_caps && ch.is_ascii_lowercase() {
+            ch = ch.to_ascii_uppercase();
+        } else if shift_or_caps && ch.is_ascii_uppercase() {
+            ch = ch.to_ascii_lowercase();
+        }
+        return Some(ch);
+    }
+    
+    if keysym >= 0x0a0 && keysym <= 0x0ff {
+        return char::from_u32(keysym);
+    }
+    
+    None
+}
 
 struct CachedColors {
     bg: Rgb,
@@ -41,7 +121,7 @@ struct App {
     font: Font,
     glyph_cache: HashMap<(char, u32), (fontdue::Metrics, Vec<u8>)>,
     colors: CachedColors,
-    xkb_state: xkb::State,
+    keymap: KeyboardMap,
 }
 
 fn load_font(font_family: &str) -> Option<Font> {
@@ -61,24 +141,8 @@ fn load_font(font_family: &str) -> Option<Font> {
     Font::from_bytes(data, FontSettings::default()).ok()
 }
 
-fn create_xkb_state() -> Result<xkb::State, Box<dyn std::error::Error>> {
-    let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
-    let keymap = xkb::Keymap::new_from_names(
-        &context,
-        "",
-        "",
-        "",
-        "",
-        None,
-        xkb::KEYMAP_COMPILE_NO_FLAGS,
-    ).ok_or("Failed to create XKB keymap")?;
-    
-    let state = xkb::State::new(&keymap);
-    Ok(state)
-}
-
 impl App {
-    fn new(config: Config, frequency: Frequency, apps: Vec<String>, xkb_state: xkb::State) -> Self {
+    fn new(config: Config, frequency: Frequency, apps: Vec<String>, keymap: KeyboardMap) -> Self {
         let font = load_font(&config.appearance.font_family)
             .unwrap_or_else(|| panic!("Font '{}' not found", config.appearance.font_family));
         
@@ -106,7 +170,7 @@ impl App {
             font,
             glyph_cache: HashMap::new(),
             colors,
-            xkb_state,
+            keymap,
         }
     }
 
@@ -274,20 +338,29 @@ impl App {
         true
     }
 
-    fn handle_key(&mut self, keycode: u8) -> Option<bool> {
+    fn handle_key(&mut self, keycode: u8, state: u16) -> Option<bool> {
         let results = filter_apps(&self.apps, &self.query, &self.frequency);
-        let xkb_keycode = xkb::Keycode::new(keycode as u32);
-        let keysym = self.xkb_state.key_get_one_sym(xkb_keycode);
+        
+        let (keysym, ch) = self.keymap.lookup(keycode, state)?;
         
         if self.delete_confirm.is_some() {
-            match keysym {
-                xkb::Keysym::y | xkb::Keysym::Y | xkb::Keysym::Return => {
+            match ch {
+                Some('y') | Some('Y') => {
                     if let Some(name) = self.delete_confirm.take() {
                         self.frequency.remove(&name);
                         let _ = self.frequency.save();
                     }
                 }
-                xkb::Keysym::n | xkb::Keysym::N | xkb::Keysym::Escape => {
+                Some('n') | Some('N') => {
+                    self.delete_confirm = None;
+                }
+                _ if keysym == keysym::RETURN => {
+                    if let Some(name) = self.delete_confirm.take() {
+                        self.frequency.remove(&name);
+                        let _ = self.frequency.save();
+                    }
+                }
+                _ if keysym == keysym::ESCAPE => {
                     self.delete_confirm = None;
                 }
                 _ => {}
@@ -298,12 +371,12 @@ impl App {
         let cursor_at_end = self.cursor_pos >= self.query.chars().count();
         
         match keysym {
-            xkb::Keysym::Escape => Some(true),
-            xkb::Keysym::Return | xkb::Keysym::KP_Enter => {
+            keysym::ESCAPE => Some(true),
+            keysym::RETURN | keysym::KP_ENTER => {
                 self.launch_selected(&results);
                 Some(true)
             }
-            xkb::Keysym::Tab => {
+            keysym::TAB => {
                 if let Some(app) = results.get(self.selected) {
                     self.query = app.name.clone();
                     self.cursor_pos = self.query.chars().count();
@@ -311,7 +384,7 @@ impl App {
                 }
                 None
             }
-            xkb::Keysym::Delete => {
+            keysym::DELETE => {
                 if let Some(app) = results.get(self.selected) {
                     if self.frequency.get(&app.name) > 0 {
                         self.delete_confirm = Some(app.name.clone());
@@ -319,7 +392,7 @@ impl App {
                 }
                 None
             }
-            xkb::Keysym::BackSpace => {
+            keysym::BACKSPACE => {
                 if self.cursor_pos > 0 {
                     let idx: usize = self.query.chars().take(self.cursor_pos - 1).map(|c| c.len_utf8()).sum();
                     let end_idx: usize = self.query.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum();
@@ -331,7 +404,7 @@ impl App {
                 }
                 None
             }
-            xkb::Keysym::Left => {
+            keysym::LEFT => {
                 if self.cursor_in_results {
                     if self.selected > 0 {
                         if self.selected == self.scroll_offset && self.scroll_offset > 0 {
@@ -347,7 +420,7 @@ impl App {
                 }
                 None
             }
-            xkb::Keysym::Right => {
+            keysym::RIGHT => {
                 if self.cursor_in_results {
                     if self.selected < self.last_visible {
                         self.selected += 1;
@@ -364,26 +437,19 @@ impl App {
                 None
             }
             _ => {
-                let s = self.xkb_state.key_get_utf8(xkb_keycode);
-                for ch in s.chars() {
-                    if ch.is_control() {
-                        continue;
+                if let Some(c) = ch {
+                    if !c.is_control() {
+                        let idx: usize = self.query.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum();
+                        self.query.insert(idx, c);
+                        self.cursor_pos += 1;
+                        self.cursor_in_results = false;
+                        self.selected = 0;
+                        self.scroll_offset = 0;
                     }
-                    let idx: usize = self.query.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum();
-                    self.query.insert(idx, ch);
-                    self.cursor_pos += 1;
-                    self.cursor_in_results = false;
-                    self.selected = 0;
-                    self.scroll_offset = 0;
                 }
                 None
             }
         }
-    }
-    
-    fn update_xkb_state(&mut self, keycode: u8, direction: xkb::KeyDirection) {
-        let xkb_keycode = xkb::Keycode::new(keycode as u32);
-        self.xkb_state.update_key(xkb_keycode, direction);
     }
 }
 
@@ -422,11 +488,14 @@ impl X11Context {
 
 pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let (conn, screen_num) = x11rb::connect(None)?;
-    let screen = &conn.setup().roots[screen_num];
+    let setup = conn.setup();
+    let screen = &setup.roots[screen_num];
     let width = screen.width_in_pixels;
     let root = screen.root;
     let depth = screen.root_depth;
     let visual = screen.root_visual;
+
+    let keymap = KeyboardMap::new(&conn, setup)?;
 
     let win_id = conn.generate_id()?;
     let gc_id = conn.generate_id()?;
@@ -578,8 +647,7 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
         conn.flush()?;
     }
 
-    let xkb_state = create_xkb_state()?;
-    let mut app = App::new(config, frequency, apps, xkb_state);
+    let mut app = App::new(config, frequency, apps, keymap);
 
     let mut ctx = X11Context {
         conn,
@@ -613,9 +681,7 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
                 ctx.redraw(&pixels)?;
             }
             Event::KeyPress(e) => {
-                app.update_xkb_state(e.detail, xkb::KeyDirection::Down);
-
-                if let Some(should_quit) = app.handle_key(e.detail) {
+                if let Some(should_quit) = app.handle_key(e.detail, e.state.into()) {
                     if should_quit {
                         break;
                     }
@@ -623,9 +689,6 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
 
                 let pixels = app.render(ctx.current_width, ctx.current_height);
                 ctx.redraw(&pixels)?;
-            }
-            Event::KeyRelease(e) => {
-                app.update_xkb_state(e.detail, xkb::KeyDirection::Up);
             }
             Event::FocusOut(_) => {
                 for _ in 0..50 {
