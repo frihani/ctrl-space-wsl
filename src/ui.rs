@@ -1,5 +1,5 @@
-use eframe::egui::{self, Color32, FontId, Key, TextEdit, text_selection::CCursorRange};
-use eframe::egui::text::{CCursor, LayoutJob, TextFormat};
+use egui::{Color32, FontId, Key, TextEdit, text_selection::CCursorRange};
+use egui::text::{CCursor, LayoutJob, TextFormat};
 
 use crate::config::{parse_hex_color, Config};
 use crate::filter::{filter_apps, FilteredApp};
@@ -54,6 +54,7 @@ pub struct LauncherApp {
     delete_confirm: Option<String>,
     cursor_in_results: bool,
     close_at: Option<std::time::Instant>,
+    hide_window: bool,
 }
 
 impl LauncherApp {
@@ -64,7 +65,7 @@ impl LauncherApp {
         let sel_bg = parse_hex_color(&config.appearance.selection_bg).unwrap_or(Color32::BLUE);
         let match_hl = parse_hex_color(&config.appearance.match_highlight).unwrap_or(Color32::GREEN);
         let prompt_color = parse_hex_color(&config.appearance.prompt_color).unwrap_or(Color32::from_rgb(189, 147, 249));
-        let font_size = (config.appearance.font_size as f32) * (96.0 / 72.0);
+        let font_size = config.appearance.font_size as f32;
         Self {
             query: String::new(),
             apps,
@@ -86,7 +87,16 @@ impl LauncherApp {
             delete_confirm: None,
             cursor_in_results: false,
             close_at: None,
+            hide_window: false,
         }
+    }
+
+    pub fn should_hide(&self) -> bool {
+        self.hide_window
+    }
+
+    pub fn should_quit(&self) -> bool {
+        self.should_close || self.close_at.map(|t| std::time::Instant::now() >= t).unwrap_or(false)
     }
 
     fn launch_selected(&mut self, results: &[FilteredApp]) {
@@ -99,6 +109,7 @@ impl LauncherApp {
             return;
         };
 
+        self.hide_window = true;
         let result = launcher::launch_command(&command);
         if result.success && !result.command.is_empty() {
             self.frequency.increment(&result.command);
@@ -113,16 +124,8 @@ impl LauncherApp {
             self.request_focus = true;
         }
     }
-}
 
-impl eframe::App for LauncherApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
-        if self.first_frame {
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(0.0, 0.0)));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        }
-
+    pub fn update(&mut self, ctx: &egui::Context) {
         let results = filter_apps(&self.apps, &self.query, &self.frequency);
         if self.selected >= results.len() {
             self.selected = results.len().saturating_sub(1);
@@ -158,18 +161,7 @@ impl eframe::App for LauncherApp {
             }
         }
 
-        if let Some(close_at) = self.close_at {
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(0.0, 0.0)));
-            if std::time::Instant::now() >= close_at {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            } else {
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
-            }
-            return;
-        }
-
-        if self.should_close {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        if self.close_at.is_some() {
             return;
         }
 
@@ -179,7 +171,12 @@ impl eframe::App for LauncherApp {
 
         egui::CentralPanel::default().frame(panel_frame).show(ctx, |ui| {
             ui.style_mut().visuals.text_cursor.blink = false;
-            
+            ui.style_mut().interaction.selectable_labels = false;
+
+            if ctx.input(|i| i.pointer.any_click()) {
+                self.request_focus = true;
+            }
+
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
 
@@ -190,11 +187,11 @@ impl eframe::App for LauncherApp {
                         .color(self.prompt_color));
                     return;
                 }
-                
+
                 let prompt_width = ui.available_width() / 4.0;
 
                 let text_edit_id = egui::Id::new("query_input");
-                
+
                 let cursor_at_end = if let Some(state) = TextEdit::load_state(ctx, text_edit_id) {
                     if let Some(range) = state.cursor.char_range() {
                         range.primary.index >= self.query.len()
@@ -204,10 +201,10 @@ impl eframe::App for LauncherApp {
                 } else {
                     true
                 };
-                
+
                 let right_pressed = ctx.input(|i| i.key_pressed(Key::ArrowRight));
                 let left_pressed = ctx.input(|i| i.key_pressed(Key::ArrowLeft));
-                
+
                 if right_pressed && cursor_at_end && !self.cursor_in_results && results.len() > 1 {
                     self.cursor_in_results = true;
                     self.selected = 1;
@@ -229,9 +226,9 @@ impl eframe::App for LauncherApp {
                         self.cursor_in_results = false;
                     }
                 }
-                
+
                 let keep_cursor_at_end = self.cursor_in_results;
-                
+
                 let mut text_edit = TextEdit::singleline(&mut self.query)
                     .id(text_edit_id)
                     .font(FontId::monospace(self.font_size))
@@ -255,13 +252,13 @@ impl eframe::App for LauncherApp {
                     self.first_frame = false;
                     self.request_focus = false;
                 }
-                
+
                 if response.changed() {
                     self.cursor_in_results = false;
                     self.selected = 0;
                     self.scroll_offset = 0;
                 }
-                
+
                 if keep_cursor_at_end {
                     let cursor = CCursor::new(self.query.len());
                     let selection = CCursorRange::one(cursor);
@@ -280,15 +277,14 @@ impl eframe::App for LauncherApp {
                 let padding = 12.0;
 
                 let mut visible_indices = Vec::new();
+                let char_width = ctx.fonts_mut(|f| f.glyph_width(&font_id, 'M'));
                 for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
-                    let text_width = ui.fonts(|f| {
-                        f.glyph_width(&font_id, 'M') * app.name.len() as f32
-                    }) + padding;
-                    
+                    let text_width = char_width * app.name.len() as f32 + padding;
+
                     if current_x + text_width > max_x && !visible_indices.is_empty() {
                         break;
                     }
-                    
+
                     visible_indices.push(i);
                     current_x += text_width;
                 }
