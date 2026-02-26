@@ -65,7 +65,7 @@ impl LauncherApp {
         let sel_bg = parse_hex_color(&config.appearance.selection_bg).unwrap_or(Color32::BLUE);
         let match_hl = parse_hex_color(&config.appearance.match_highlight).unwrap_or(Color32::GREEN);
         let prompt_color = parse_hex_color(&config.appearance.prompt_color).unwrap_or(Color32::from_rgb(189, 147, 249));
-        let font_size = (config.appearance.font_size as f32) * (96.0 / 72.0);
+        let font_size = config.appearance.font_size as f32;
         Self {
             query: String::new(),
             apps,

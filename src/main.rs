@@ -72,7 +72,7 @@ fn main() {
 
     let config = Config::load();
     let frequency = Frequency::load();
-    
+
     let apps = if frequency.is_empty() {
         let discovered = app_discovery::discover_apps();
         discovered
@@ -112,7 +112,7 @@ fn main() {
     let (mut painter, mut egui_state) = egui_sdl2_gl::with_sdl2(
         &window,
         shader_ver,
-        DpiScaling::Custom(1.0),
+        DpiScaling::Custom((96.0 / 72.0) as f32),
     );
 
     let egui_ctx = egui::Context::default();
