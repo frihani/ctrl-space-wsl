@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::process::Command;
 
 use crate::config::{Config, Rgb, parse_hex_color};
 use crate::frequency::Frequency;
@@ -13,7 +14,6 @@ use x11rb::wrapper::ConnectionExt as _;
 
 use fontdue::{Font, FontSettings};
 use xkbcommon::xkb;
-use fontconfig::Fontconfig;
 
 const WINDOW_HEIGHT: u16 = 28;
 
@@ -45,10 +45,19 @@ struct App {
 }
 
 fn load_font(font_family: &str) -> Option<Font> {
-    let fc = Fontconfig::new()?;
-    let font_match = fc.find(font_family, None)?;
-    let path = font_match.path;
-    let data = fs::read(&path).ok()?;
+    let output = Command::new("fc-match")
+        .args([font_family, "--format=%{file}"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?;
+    let path = path.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let data = fs::read(path).ok()?;
     Font::from_bytes(data, FontSettings::default()).ok()
 }
 
