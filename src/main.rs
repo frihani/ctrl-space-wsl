@@ -13,11 +13,11 @@ use frequency::Frequency;
 use lock::kill_others;
 use ui::LauncherApp;
 
+use config::parse_hex_color;
 use egui_sdl2_gl::sdl2;
 use egui_sdl2_gl::sdl2::event::Event;
 use egui_sdl2_gl::sdl2::video::SwapInterval;
 use egui_sdl2_gl::{DpiScaling, ShaderVersion};
-use config::parse_hex_color;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const WINDOW_HEIGHT: u32 = 28;
@@ -28,7 +28,10 @@ fn print_info() {
     println!("Version:          v{}", VERSION);
     println!("Config:           {}", dir.join("config.toml").display());
     println!("Cache:            {}", dir.join("freq.txt").display());
-    println!("Logs:             {}", dir.join("ctrl-space-wsl.log").display());
+    println!(
+        "Logs:             {}",
+        dir.join("ctrl-space-wsl.log").display()
+    );
 }
 
 fn main() {
@@ -71,20 +74,17 @@ fn main() {
     kill_others();
 
     let config = Config::load();
-    let frequency = Frequency::load();
+    let clear_color = parse_hex_color(&config.appearance.background)
+        .unwrap_or(egui::Color32::from_rgb(33, 34, 44));
 
-    let apps = if frequency.is_empty() {
-        let discovered = app_discovery::discover_apps();
-        discovered
-    } else {
-        frequency.refresh_in_background();
-        frequency.apps()
-    };
+    sdl2::hint::set("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR", "0");
 
     let sdl_context = sdl2::init().expect("Failed to init SDL2");
     let video_subsystem = sdl_context.video().expect("Failed to init SDL2 video");
 
-    let display_bounds = video_subsystem.display_bounds(0).unwrap_or(sdl2::rect::Rect::new(0, 0, 1920, 1080));
+    let display_bounds = video_subsystem
+        .display_bounds(0)
+        .unwrap_or(sdl2::rect::Rect::new(0, 0, 1920, 1080));
     let window_width = display_bounds.width();
 
     let gl_attr = video_subsystem.gl_attr();
@@ -103,24 +103,35 @@ fn main() {
         .build()
         .expect("Failed to create window");
 
-    let _gl_context = window.gl_create_context().expect("Failed to create GL context");
-
-    sdl_context.mouse().show_cursor(false);
-
-    let shader_ver = ShaderVersion::Default;
+    let _gl_context = window
+        .gl_create_context()
+        .expect("Failed to create GL context");
 
     let (mut painter, mut egui_state) = egui_sdl2_gl::with_sdl2(
         &window,
-        shader_ver,
+        ShaderVersion::Default,
         DpiScaling::Custom((96.0 / 72.0) as f32),
+        // DpiScaling::Custom(1.5)
     );
 
+    let _ = video_subsystem.gl_set_swap_interval(SwapInterval::Immediate);
+    painter.paint_jobs(Some(clear_color), Default::default(), vec![]);
+    window.gl_swap_window();
+    let _ = video_subsystem.gl_set_swap_interval(SwapInterval::VSync);
+
+    sdl_context.mouse().show_cursor(false);
     let egui_ctx = egui::Context::default();
     let mut event_pump = sdl_context.event_pump().expect("Failed to get event pump");
 
-    let _ = video_subsystem.gl_set_swap_interval(SwapInterval::VSync);
+    let frequency = Frequency::load();
 
-    let clear_color = parse_hex_color(&config.appearance.background).unwrap_or(egui::Color32::from_rgb(33, 34, 44));
+    let apps = if frequency.is_empty() {
+        let discovered = app_discovery::discover_apps();
+        discovered
+    } else {
+        frequency.refresh_in_background();
+        frequency.apps()
+    };
 
     let mut app = LauncherApp::new(config, apps, frequency);
     let mut window_hidden = false;
