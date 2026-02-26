@@ -529,13 +529,49 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
         &[0, 0, WINDOW_HEIGHT as u32, 0, 0, 0, 0, 0, 0, width as u32, 0, 0],
     )?;
 
+    let wm_hints: [u32; 9] = [
+        1,    // flags: InputHint
+        1,    // input: True
+        0, 0, 0, 0, 0, 0, 0,
+    ];
+    conn.change_property32(
+        PropMode::REPLACE,
+        win_id,
+        AtomEnum::WM_HINTS,
+        AtomEnum::WM_HINTS,
+        &wm_hints,
+    )?;
+
     conn.map_window(win_id)?;
-    conn.set_input_focus(InputFocus::PARENT, win_id, x11rb::CURRENT_TIME)?;
     conn.flush()?;
+
+    let mut grabbed = false;
+    for attempt in 0..100 {
+        let reply = conn.grab_keyboard(
+            false,
+            win_id,
+            x11rb::CURRENT_TIME,
+            GrabMode::ASYNC,
+            GrabMode::ASYNC,
+        )?.reply()?;
+        if reply.status == GrabStatus::SUCCESS {
+            grabbed = true;
+            break;
+        }
+        if attempt == 99 {
+            eprintln!("warn: keyboard grab failed after 100 attempts (status {:?})", reply.status);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    if !grabbed {
+        let _ = conn.set_input_focus(InputFocus::PARENT, win_id, x11rb::CURRENT_TIME);
+        conn.flush()?;
+    }
 
     let xkb_state = create_xkb_state()?;
     let mut app = App::new(config, frequency, apps, xkb_state);
-    
+
     let mut ctx = X11Context {
         conn,
         win_id,
@@ -547,11 +583,21 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
 
     loop {
         let event = ctx.conn.wait_for_event()?;
-        
+
         match event {
             Event::ConfigureNotify(e) => {
                 ctx.current_width = e.width;
                 ctx.current_height = e.height;
+            }
+            Event::MapNotify(_) => {
+                ctx.conn.grab_keyboard(
+                    true,
+                    ctx.win_id,
+                    x11rb::CURRENT_TIME,
+                    GrabMode::ASYNC,
+                    GrabMode::ASYNC,
+                )?;
+                ctx.conn.flush()?;
             }
             Event::Expose(_) => {
                 let pixels = app.render(ctx.current_width, ctx.current_height);
@@ -559,22 +605,40 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
             }
             Event::KeyPress(e) => {
                 app.update_xkb_state(e.detail, xkb::KeyDirection::Down);
-                
+
                 if let Some(should_quit) = app.handle_key(e.detail) {
                     if should_quit {
                         break;
                     }
                 }
-                
+
                 let pixels = app.render(ctx.current_width, ctx.current_height);
                 ctx.redraw(&pixels)?;
             }
             Event::KeyRelease(e) => {
                 app.update_xkb_state(e.detail, xkb::KeyDirection::Up);
             }
+            Event::FocusOut(_) => {
+                for _ in 0..50 {
+                    let reply = ctx.conn.grab_keyboard(
+                        false,
+                        ctx.win_id,
+                        x11rb::CURRENT_TIME,
+                        GrabMode::ASYNC,
+                        GrabMode::ASYNC,
+                    )?.reply()?;
+                    if reply.status == GrabStatus::SUCCESS {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
             _ => {}
         }
     }
+
+    ctx.conn.ungrab_keyboard(x11rb::CURRENT_TIME)?;
+    ctx.conn.flush()?;
 
     Ok(())
 }
