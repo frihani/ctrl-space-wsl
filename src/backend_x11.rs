@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 
-use crate::config::{Config, Rgb, parse_hex_color};
-use crate::frequency::Frequency;
+use crate::config::{parse_hex_color, Config, Rgb};
 use crate::filter::{filter_apps, FilteredApp};
+use crate::frequency::Frequency;
 use crate::launcher;
 
 use x11rb::connection::Connection;
@@ -38,49 +38,49 @@ impl KeyboardMap {
         let min_keycode = setup.min_keycode;
         let max_keycode = setup.max_keycode;
         let count = max_keycode - min_keycode + 1;
-        
+
         let reply = conn.get_keyboard_mapping(min_keycode, count)?.reply()?;
-        
+
         Ok(Self {
             keysyms: reply.keysyms,
             keysyms_per_keycode: reply.keysyms_per_keycode,
             min_keycode,
         })
     }
-    
+
     fn lookup(&self, keycode: u8, state: u16) -> Option<(u32, Option<char>)> {
         if keycode < self.min_keycode {
             return None;
         }
-        
+
         let idx = (keycode - self.min_keycode) as usize * self.keysyms_per_keycode as usize;
         if idx >= self.keysyms.len() {
             return None;
         }
-        
+
         let shift = (state & u16::from(KeyButMask::SHIFT)) != 0;
         let caps = (state & u16::from(KeyButMask::LOCK)) != 0;
-        
+
         let col = if shift { 1 } else { 0 };
         let keysym = self.keysyms.get(idx + col).copied().unwrap_or(0);
-        
+
         let keysym = if keysym == 0 {
             self.keysyms.get(idx).copied().unwrap_or(0)
         } else {
             keysym
         };
-        
+
         if keysym == 0 {
             return None;
         }
-        
+
         let ch = keysym_to_char(keysym, shift ^ caps);
         Some((keysym, ch))
     }
 }
 
 fn keysym_to_char(keysym: u32, shift_or_caps: bool) -> Option<char> {
-    if keysym >= 0x20 && keysym <= 0x7e {
+    if (0x20..=0x7e).contains(&keysym) {
         let mut ch = keysym as u8 as char;
         if shift_or_caps && ch.is_ascii_lowercase() {
             ch = ch.to_ascii_uppercase();
@@ -89,11 +89,11 @@ fn keysym_to_char(keysym: u32, shift_or_caps: bool) -> Option<char> {
         }
         return Some(ch);
     }
-    
-    if keysym >= 0x0a0 && keysym <= 0x0ff {
+
+    if (0x0a0..=0x0ff).contains(&keysym) {
         return char::from_u32(keysym);
     }
-    
+
     None
 }
 
@@ -143,19 +143,26 @@ fn load_font(font_family: &str) -> Option<Font> {
 }
 
 impl App {
-    fn new(config: Config, frequency: Frequency, apps: Vec<String>, keymap: KeyboardMap, screen_width: u16) -> Self {
+    fn new(
+        config: Config,
+        frequency: Frequency,
+        apps: Vec<String>,
+        keymap: KeyboardMap,
+        screen_width: u16,
+    ) -> Self {
         let font = load_font(&config.appearance.font_family)
             .unwrap_or_else(|| panic!("Font '{}' not found", config.appearance.font_family));
-        
+
         let colors = CachedColors {
             bg: parse_hex_color(&config.appearance.background).unwrap_or(Rgb(33, 34, 44)),
             fg: parse_hex_color(&config.appearance.foreground).unwrap_or(Rgb(248, 248, 242)),
             sel_bg: parse_hex_color(&config.appearance.selection_bg).unwrap_or(Rgb(98, 114, 164)),
             sel_fg: parse_hex_color(&config.appearance.selection_fg).unwrap_or(Rgb(248, 248, 242)),
-            match_hl: parse_hex_color(&config.appearance.match_highlight).unwrap_or(Rgb(139, 233, 253)),
+            match_hl: parse_hex_color(&config.appearance.match_highlight)
+                .unwrap_or(Rgb(139, 233, 253)),
             prompt: parse_hex_color(&config.appearance.prompt_color).unwrap_or(Rgb(189, 147, 249)),
         };
-        
+
         Self {
             config,
             frequency,
@@ -178,13 +185,13 @@ impl App {
 
     fn render(&mut self, width: u16, height: u16) -> Vec<u8> {
         let mut buffer = vec![0u8; width as usize * height as usize * 4];
-        
+
         let bg = self.colors.bg;
         for pixel in buffer.chunks_exact_mut(4) {
             pixel[0] = bg.2; // B
             pixel[1] = bg.1; // G
             pixel[2] = bg.0; // R
-            pixel[3] = 255;  // A
+            pixel[3] = 255; // A
         }
 
         let dpi_scale = 96.0 / 72.0;
@@ -195,7 +202,17 @@ impl App {
 
         if let Some(ref name) = self.delete_confirm {
             let prompt = format!("Delete '{}'? (y/n)", name);
-            self.draw_text(&mut buffer, width, &prompt, x_offset + char_width, y_offset, self.colors.prompt, &[], self.colors.prompt, font_size);
+            self.draw_text(
+                &mut buffer,
+                width,
+                &prompt,
+                x_offset + char_width,
+                y_offset,
+                self.colors.prompt,
+                &[],
+                self.colors.prompt,
+                font_size,
+            );
             return buffer;
         }
 
@@ -207,25 +224,43 @@ impl App {
         let text_start = x_offset + char_width;
         let query = self.query.clone();
         let text_before_cursor: String = query.chars().take(self.cursor_pos).collect();
-        
-        self.draw_text(&mut buffer, width, &query, text_start, y_offset, self.colors.prompt, &[], self.colors.prompt, font_size);
-        
+
+        self.draw_text(
+            &mut buffer,
+            width,
+            &query,
+            text_start,
+            y_offset,
+            self.colors.prompt,
+            &[],
+            self.colors.prompt,
+            font_size,
+        );
+
         let cursor_offset = self.measure_text(&text_before_cursor, font_size);
         let cursor_x = text_start + cursor_offset;
         let cursor_height = (font_size * 1.2) as i32;
         let cursor_y = y_offset - font_size as i32;
-        self.fill_rect(&mut buffer, width, cursor_x, cursor_y, 2, cursor_height, self.colors.prompt);
-        
+        self.fill_rect(
+            &mut buffer,
+            width,
+            cursor_x,
+            cursor_y,
+            2,
+            cursor_height,
+            self.colors.prompt,
+        );
+
         x_offset += (width as i32 / 4).saturating_sub(x_offset) + 8;
 
         let right_padding = char_width;
         let max_x = width as i32 - right_padding;
 
         let mut visible_count = 0;
-        
+
         for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
             let text_width = self.measure_text(&app.name, font_size) + 12;
-            
+
             if x_offset + text_width > max_x {
                 break;
             }
@@ -238,43 +273,79 @@ impl App {
             };
 
             if let Some(bg) = bg_color {
-                self.fill_rect(&mut buffer, width, x_offset, 0, text_width, height as i32, bg);
+                self.fill_rect(
+                    &mut buffer,
+                    width,
+                    x_offset,
+                    0,
+                    text_width,
+                    height as i32,
+                    bg,
+                );
             }
 
-            self.draw_text(&mut buffer, width, &app.name, x_offset + 6, y_offset, text_color, &app.match_indices, self.colors.match_hl, font_size);
+            self.draw_text(
+                &mut buffer,
+                width,
+                &app.name,
+                x_offset + 6,
+                y_offset,
+                text_color,
+                &app.match_indices,
+                self.colors.match_hl,
+                font_size,
+            );
             x_offset += text_width;
-            
+
             self.last_visible = i;
             visible_count += 1;
         }
-        
+
         self.page_size = visible_count;
 
         buffer
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn fill_rect(&self, buffer: &mut [u8], width: u16, x: i32, y: i32, w: i32, h: i32, color: Rgb) {
         for py in y.max(0)..(y + h).min(buffer.len() as i32 / (width as i32 * 4)) {
             for px in x.max(0)..(x + w).min(width as i32) {
                 let idx = (py as usize * width as usize + px as usize) * 4;
                 if idx + 3 < buffer.len() {
-                    buffer[idx] = color.2;     // B
+                    buffer[idx] = color.2; // B
                     buffer[idx + 1] = color.1; // G
                     buffer[idx + 2] = color.0; // R
-                    buffer[idx + 3] = 255;     // A
+                    buffer[idx + 3] = 255; // A
                 }
             }
         }
     }
 
-    fn draw_text(&mut self, buffer: &mut [u8], width: u16, text: &str, x: i32, y: i32, color: Rgb, match_indices: &[usize], highlight: Rgb, font_size: f32) -> i32 {
+    #[allow(clippy::too_many_arguments)]
+    fn draw_text(
+        &mut self,
+        buffer: &mut [u8],
+        width: u16,
+        text: &str,
+        x: i32,
+        y: i32,
+        color: Rgb,
+        match_indices: &[usize],
+        highlight: Rgb,
+        font_size: f32,
+    ) -> i32 {
         let mut cursor_x = x;
         let px_size = font_size as u32;
 
         for (i, ch) in text.chars().enumerate() {
-            let glyph_color = if match_indices.contains(&i) { highlight } else { color };
-            
-            let (metrics, bitmap) = self.glyph_cache
+            let glyph_color = if match_indices.contains(&i) {
+                highlight
+            } else {
+                color
+            };
+
+            let (metrics, bitmap) = self
+                .glyph_cache
                 .entry((ch, px_size))
                 .or_insert_with(|| self.font.rasterize(ch, font_size));
 
@@ -289,7 +360,11 @@ impl App {
                     }
                     let dx = gx + px as i32;
                     let dy = gy + py as i32;
-                    if dx < 0 || dy < 0 || dx >= width as i32 || dy >= (buffer.len() / (width as usize * 4)) as i32 {
+                    if dx < 0
+                        || dy < 0
+                        || dx >= width as i32
+                        || dy >= (buffer.len() / (width as usize * 4)) as i32
+                    {
                         continue;
                     }
                     let idx = (dy as usize * width as usize + dx as usize) * 4;
@@ -298,8 +373,10 @@ impl App {
                     }
                     let a = alpha as f32 / 255.0;
                     buffer[idx] = (glyph_color.2 as f32 * a + buffer[idx] as f32 * (1.0 - a)) as u8;
-                    buffer[idx + 1] = (glyph_color.1 as f32 * a + buffer[idx + 1] as f32 * (1.0 - a)) as u8;
-                    buffer[idx + 2] = (glyph_color.0 as f32 * a + buffer[idx + 2] as f32 * (1.0 - a)) as u8;
+                    buffer[idx + 1] =
+                        (glyph_color.1 as f32 * a + buffer[idx + 1] as f32 * (1.0 - a)) as u8;
+                    buffer[idx + 2] =
+                        (glyph_color.0 as f32 * a + buffer[idx + 2] as f32 * (1.0 - a)) as u8;
                 }
             }
 
@@ -313,7 +390,8 @@ impl App {
         let px_size = font_size as u32;
         let mut width = 0;
         for ch in text.chars() {
-            let (metrics, _) = self.glyph_cache
+            let (metrics, _) = self
+                .glyph_cache
                 .entry((ch, px_size))
                 .or_insert_with(|| self.font.rasterize(ch, font_size));
             width += metrics.advance_width as i32;
@@ -321,7 +399,12 @@ impl App {
         width
     }
 
-    fn find_page_containing(&mut self, results: &[FilteredApp], target_idx: usize, screen_width: u16) -> usize {
+    fn find_page_containing(
+        &mut self,
+        results: &[FilteredApp],
+        target_idx: usize,
+        screen_width: u16,
+    ) -> usize {
         let dpi_scale = 96.0 / 72.0;
         let font_size = self.config.appearance.font_size as f32 * dpi_scale;
         let char_width = self.measure_text("M", font_size);
@@ -331,27 +414,27 @@ impl App {
         let available_width = max_x - results_start_x;
 
         let mut page_start = 0;
-        
+
         while page_start < results.len() {
             let mut x = 0;
             let mut page_end = page_start;
-            
-            for i in page_start..results.len() {
-                let item_width = self.measure_text(&results[i].name, font_size) + 12;
+
+            for (i, result) in results.iter().enumerate().skip(page_start) {
+                let item_width = self.measure_text(&result.name, font_size) + 12;
                 if x + item_width > available_width {
                     break;
                 }
                 x += item_width;
                 page_end = i;
             }
-            
+
             if target_idx >= page_start && target_idx <= page_end {
                 return page_start;
             }
-            
+
             page_start = page_end + 1;
         }
-        
+
         0
     }
 
@@ -374,9 +457,9 @@ impl App {
 
     fn handle_key(&mut self, keycode: u8, state: u16) -> Option<bool> {
         let results = filter_apps(&self.apps, &self.query, &self.frequency);
-        
+
         let (keysym, ch) = self.keymap.lookup(keycode, state)?;
-        
+
         if self.delete_confirm.is_some() {
             match ch {
                 Some('y') | Some('Y') => {
@@ -403,7 +486,7 @@ impl App {
         }
 
         let cursor_at_end = self.cursor_pos >= self.query.chars().count();
-        
+
         match keysym {
             keysym::ESCAPE => Some(true),
             keysym::RETURN | keysym::KP_ENTER => {
@@ -428,8 +511,18 @@ impl App {
             }
             keysym::BACKSPACE => {
                 if self.cursor_pos > 0 {
-                    let idx: usize = self.query.chars().take(self.cursor_pos - 1).map(|c| c.len_utf8()).sum();
-                    let end_idx: usize = self.query.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum();
+                    let idx: usize = self
+                        .query
+                        .chars()
+                        .take(self.cursor_pos - 1)
+                        .map(|c| c.len_utf8())
+                        .sum();
+                    let end_idx: usize = self
+                        .query
+                        .chars()
+                        .take(self.cursor_pos)
+                        .map(|c| c.len_utf8())
+                        .sum();
                     self.query.replace_range(idx..end_idx, "");
                     self.cursor_pos -= 1;
                     self.cursor_in_results = false;
@@ -443,7 +536,11 @@ impl App {
                     if self.selected > 1 {
                         let new_selected = self.selected - 1;
                         if new_selected < self.scroll_offset {
-                            self.scroll_offset = self.find_page_containing(&results, new_selected, self.screen_width);
+                            self.scroll_offset = self.find_page_containing(
+                                &results,
+                                new_selected,
+                                self.screen_width,
+                            );
                         }
                         self.selected = new_selected;
                     } else {
@@ -475,7 +572,12 @@ impl App {
             _ => {
                 if let Some(c) = ch {
                     if !c.is_control() {
-                        let idx: usize = self.query.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum();
+                        let idx: usize = self
+                            .query
+                            .chars()
+                            .take(self.cursor_pos)
+                            .map(|c| c.len_utf8())
+                            .sum();
                         self.query.insert(idx, c);
                         self.cursor_pos += 1;
                         self.cursor_in_results = false;
@@ -501,28 +603,49 @@ struct X11Context {
 impl X11Context {
     fn redraw(&self, pixels: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         let pixmap_id = self.conn.generate_id()?;
-        self.conn.create_pixmap(self.depth, pixmap_id, self.win_id, self.current_width, self.current_height)?;
-        
+        self.conn.create_pixmap(
+            self.depth,
+            pixmap_id,
+            self.win_id,
+            self.current_width,
+            self.current_height,
+        )?;
+
         self.conn.put_image(
             ImageFormat::Z_PIXMAP,
             pixmap_id,
             self.gc_id,
             self.current_width,
             self.current_height,
-            0, 0,
+            0,
+            0,
             0,
             self.depth,
             pixels,
         )?;
-        
-        self.conn.copy_area(pixmap_id, self.win_id, self.gc_id, 0, 0, 0, 0, self.current_width, self.current_height)?;
+
+        self.conn.copy_area(
+            pixmap_id,
+            self.win_id,
+            self.gc_id,
+            0,
+            0,
+            0,
+            0,
+            self.current_width,
+            self.current_height,
+        )?;
         self.conn.free_pixmap(pixmap_id)?;
         self.conn.flush()?;
         Ok(())
     }
 }
 
-pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(
+    config: Config,
+    frequency: Frequency,
+    apps: Vec<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (conn, screen_num) = x11rb::connect(None)?;
     let setup = conn.setup();
     let screen = &setup.roots[screen_num];
@@ -540,8 +663,10 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
         depth,
         win_id,
         root,
-        0, 0,
-        width, WINDOW_HEIGHT,
+        0,
+        0,
+        width,
+        WINDOW_HEIGHT,
         0,
         WindowClass::INPUT_OUTPUT,
         visual,
@@ -552,7 +677,7 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
                     | EventMask::KEY_PRESS
                     | EventMask::KEY_RELEASE
                     | EventMask::STRUCTURE_NOTIFY
-                    | EventMask::FOCUS_CHANGE
+                    | EventMask::FOCUS_CHANGE,
             ),
     )?;
 
@@ -567,9 +692,9 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
     )?;
 
     let size_hints: [u32; 18] = [
-        5,    // flags: USPosition | PPosition
-        0,    // x
-        0,    // y
+        5, // flags: USPosition | PPosition
+        0, // x
+        0, // y
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
     conn.change_property32(
@@ -601,11 +726,23 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
         win_id,
         motif_wm_hints,
         motif_wm_hints,
-        &[hints.flags, hints.functions, hints.decorations, hints.input_mode as u32, hints.status],
+        &[
+            hints.flags,
+            hints.functions,
+            hints.decorations,
+            hints.input_mode as u32,
+            hints.status,
+        ],
     )?;
 
-    let net_wm_window_type = conn.intern_atom(false, b"_NET_WM_WINDOW_TYPE")?.reply()?.atom;
-    let net_wm_window_type_dock = conn.intern_atom(false, b"_NET_WM_WINDOW_TYPE_DOCK")?.reply()?.atom;
+    let net_wm_window_type = conn
+        .intern_atom(false, b"_NET_WM_WINDOW_TYPE")?
+        .reply()?
+        .atom;
+    let net_wm_window_type_dock = conn
+        .intern_atom(false, b"_NET_WM_WINDOW_TYPE_DOCK")?
+        .reply()?
+        .atom;
     conn.change_property32(
         PropMode::REPLACE,
         win_id,
@@ -615,8 +752,14 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
     )?;
 
     let net_wm_state = conn.intern_atom(false, b"_NET_WM_STATE")?.reply()?.atom;
-    let net_wm_state_above = conn.intern_atom(false, b"_NET_WM_STATE_ABOVE")?.reply()?.atom;
-    let net_wm_state_sticky = conn.intern_atom(false, b"_NET_WM_STATE_STICKY")?.reply()?.atom;
+    let net_wm_state_above = conn
+        .intern_atom(false, b"_NET_WM_STATE_ABOVE")?
+        .reply()?
+        .atom;
+    let net_wm_state_sticky = conn
+        .intern_atom(false, b"_NET_WM_STATE_STICKY")?
+        .reply()?
+        .atom;
     conn.change_property32(
         PropMode::REPLACE,
         win_id,
@@ -634,18 +777,34 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
         &[0, 0, WINDOW_HEIGHT as u32, 0],
     )?;
 
-    let net_wm_strut_partial = conn.intern_atom(false, b"_NET_WM_STRUT_PARTIAL")?.reply()?.atom;
+    let net_wm_strut_partial = conn
+        .intern_atom(false, b"_NET_WM_STRUT_PARTIAL")?
+        .reply()?
+        .atom;
     conn.change_property32(
         PropMode::REPLACE,
         win_id,
         net_wm_strut_partial,
         AtomEnum::CARDINAL,
-        &[0, 0, WINDOW_HEIGHT as u32, 0, 0, 0, 0, 0, 0, width as u32, 0, 0],
+        &[
+            0,
+            0,
+            WINDOW_HEIGHT as u32,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            width as u32,
+            0,
+            0,
+        ],
     )?;
 
     let wm_hints: [u32; 9] = [
-        1,    // flags: InputHint
-        1,    // input: True
+        1, // flags: InputHint
+        1, // input: True
         0, 0, 0, 0, 0, 0, 0,
     ];
     conn.change_property32(
@@ -661,19 +820,24 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
 
     let mut grabbed = false;
     for attempt in 0..100 {
-        let reply = conn.grab_keyboard(
-            false,
-            win_id,
-            x11rb::CURRENT_TIME,
-            GrabMode::ASYNC,
-            GrabMode::ASYNC,
-        )?.reply()?;
+        let reply = conn
+            .grab_keyboard(
+                false,
+                win_id,
+                x11rb::CURRENT_TIME,
+                GrabMode::ASYNC,
+                GrabMode::ASYNC,
+            )?
+            .reply()?;
         if reply.status == GrabStatus::SUCCESS {
             grabbed = true;
             break;
         }
         if attempt == 99 {
-            eprintln!("warn: keyboard grab failed after 100 attempts (status {:?})", reply.status);
+            eprintln!(
+                "warn: keyboard grab failed after 100 attempts (status {:?})",
+                reply.status
+            );
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
@@ -728,13 +892,16 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
             }
             Event::FocusOut(_) => {
                 for _ in 0..50 {
-                    let reply = ctx.conn.grab_keyboard(
-                        false,
-                        ctx.win_id,
-                        x11rb::CURRENT_TIME,
-                        GrabMode::ASYNC,
-                        GrabMode::ASYNC,
-                    )?.reply()?;
+                    let reply = ctx
+                        .conn
+                        .grab_keyboard(
+                            false,
+                            ctx.win_id,
+                            x11rb::CURRENT_TIME,
+                            GrabMode::ASYNC,
+                            GrabMode::ASYNC,
+                        )?
+                        .reply()?;
                     if reply.status == GrabStatus::SUCCESS {
                         break;
                     }

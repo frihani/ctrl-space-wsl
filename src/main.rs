@@ -6,6 +6,7 @@ mod launcher;
 mod lock;
 
 #[cfg(feature = "x11-backend")]
+#[allow(dead_code)]
 mod backend_x11;
 
 #[cfg(feature = "sdl2-backend")]
@@ -23,7 +24,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn print_info() {
     let dir = config::config_dir();
-    #[cfg(feature = "x11-backend")]
+    #[cfg(all(feature = "x11-backend", not(feature = "sdl2-backend")))]
     let backend = "x11";
     #[cfg(feature = "sdl2-backend")]
     let backend = "sdl2";
@@ -85,7 +86,7 @@ fn main() {
         frequency.apps()
     };
 
-    #[cfg(feature = "x11-backend")]
+    #[cfg(all(feature = "x11-backend", not(feature = "sdl2-backend")))]
     {
         if let Err(e) = backend_x11::run(config, frequency, apps) {
             eprintln!("Error: {}", e);

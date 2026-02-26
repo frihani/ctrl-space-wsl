@@ -1,4 +1,4 @@
-use crate::config::{Config, parse_hex_color};
+use crate::config::{parse_hex_color, Config};
 use crate::frequency::Frequency;
 use crate::ui::LauncherApp;
 
@@ -13,7 +13,9 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) {
     let sdl_context = sdl2::init().expect("Failed to init SDL2");
     let video_subsystem = sdl_context.video().expect("Failed to init SDL2 video");
 
-    let display_bounds = video_subsystem.display_bounds(0).unwrap_or(sdl2::rect::Rect::new(0, 0, 1920, 1080));
+    let display_bounds = video_subsystem
+        .display_bounds(0)
+        .unwrap_or(sdl2::rect::Rect::new(0, 0, 1920, 1080));
     let window_width = display_bounds.width();
 
     let gl_attr = video_subsystem.gl_attr();
@@ -32,7 +34,9 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) {
         .build()
         .expect("Failed to create window");
 
-    let _gl_context = window.gl_create_context().expect("Failed to create GL context");
+    let _gl_context = window
+        .gl_create_context()
+        .expect("Failed to create GL context");
 
     sdl_context.mouse().show_cursor(false);
 
@@ -49,7 +53,9 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) {
 
     let _ = video_subsystem.gl_set_swap_interval(SwapInterval::VSync);
 
-    let clear_color: egui::Color32 = parse_hex_color(&config.appearance.background).map(Into::into).unwrap_or(egui::Color32::from_rgb(33, 34, 44));
+    let clear_color: egui::Color32 = parse_hex_color(&config.appearance.background)
+        .map(Into::into)
+        .unwrap_or(egui::Color32::from_rgb(33, 34, 44));
 
     let mut app = LauncherApp::new(config, apps, frequency);
     let mut window_hidden = false;

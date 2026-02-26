@@ -14,6 +14,14 @@ Build with SDL2 backend instead of default X11:
 cargo build --release --no-default-features --features sdl2-backend
 ```
 
+## Format
+
+```bash
+make lint
+```
+
+Runs `cargo fmt` and `cargo clippy`. Run this after making changes to ensure consistent code style.
+
 ## Test
 
 Run the release binary directly:

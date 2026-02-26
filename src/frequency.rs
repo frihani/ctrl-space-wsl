@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::app_discovery::discover_apps;
 use crate::config::config_dir;
@@ -24,7 +24,7 @@ impl Frequency {
             };
             let reader = BufReader::new(file);
             let mut counts = HashMap::new();
-            for line in reader.lines().flatten() {
+            for line in reader.lines().map_while(Result::ok) {
                 if let Some((name, count_str)) = line.rsplit_once('\t') {
                     if let Ok(count) = count_str.parse::<u32>() {
                         counts.insert(name.to_string(), count);
@@ -35,11 +35,19 @@ impl Frequency {
         } else {
             HashMap::new()
         };
-        Self { counts, path, dirty: Arc::new(AtomicBool::new(false)) }
+        Self {
+            counts,
+            path,
+            dirty: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     fn empty(path: PathBuf) -> Self {
-        Self { counts: HashMap::new(), path, dirty: Arc::new(AtomicBool::new(false)) }
+        Self {
+            counts: HashMap::new(),
+            path,
+            dirty: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     pub fn apps(&self) -> Vec<String> {
@@ -79,10 +87,10 @@ impl Frequency {
         std::thread::spawn(move || {
             let apps = discover_apps();
             let mut counts = HashMap::new();
-            
+
             if let Ok(file) = File::open(&path) {
                 let reader = BufReader::new(file);
-                for line in reader.lines().flatten() {
+                for line in reader.lines().map_while(Result::ok) {
                     if let Some((name, count_str)) = line.rsplit_once('\t') {
                         if let Ok(count) = count_str.parse::<u32>() {
                             counts.insert(name.to_string(), count);
@@ -90,11 +98,11 @@ impl Frequency {
                     }
                 }
             }
-            
+
             for app in apps {
                 counts.entry(app).or_insert(0);
             }
-            
+
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
             }

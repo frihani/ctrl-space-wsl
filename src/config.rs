@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
     pub appearance: Appearance,
@@ -19,14 +19,6 @@ pub struct Appearance {
     pub prompt_color: String,
     pub font_family: String,
     pub font_size: u8,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            appearance: Appearance::default(),
-        }
-    }
 }
 
 impl Default for Appearance {
@@ -77,8 +69,7 @@ pub fn create_default_config(force: bool) -> std::io::Result<CreateConfigResult>
     let dir = config_dir();
     fs::create_dir_all(&dir)?;
     let path = dir.join("config.toml");
-    let new_content = toml::to_string_pretty(&Config::default())
-        .unwrap_or_default();
+    let new_content = toml::to_string_pretty(&Config::default()).unwrap_or_default();
     if path.exists() {
         let existing = fs::read_to_string(&path).unwrap_or_default();
         if existing != new_content && !force {
