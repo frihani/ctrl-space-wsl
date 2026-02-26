@@ -122,6 +122,7 @@ struct App {
     glyph_cache: HashMap<(char, u32), (fontdue::Metrics, Vec<u8>)>,
     colors: CachedColors,
     keymap: KeyboardMap,
+    screen_width: u16,
 }
 
 fn load_font(font_family: &str) -> Option<Font> {
@@ -142,7 +143,7 @@ fn load_font(font_family: &str) -> Option<Font> {
 }
 
 impl App {
-    fn new(config: Config, frequency: Frequency, apps: Vec<String>, keymap: KeyboardMap) -> Self {
+    fn new(config: Config, frequency: Frequency, apps: Vec<String>, keymap: KeyboardMap, screen_width: u16) -> Self {
         let font = load_font(&config.appearance.font_family)
             .unwrap_or_else(|| panic!("Font '{}' not found", config.appearance.font_family));
         
@@ -171,6 +172,7 @@ impl App {
             glyph_cache: HashMap::new(),
             colors,
             keymap,
+            screen_width,
         }
     }
 
@@ -202,26 +204,29 @@ impl App {
             self.selected = results.len().saturating_sub(1);
         }
 
-        let text_before_cursor: String = self.query.chars().take(self.cursor_pos).collect();
-        let text_after_cursor: String = self.query.chars().skip(self.cursor_pos).collect();
+        let text_start = x_offset + char_width;
+        let query = self.query.clone();
+        let text_before_cursor: String = query.chars().take(self.cursor_pos).collect();
         
-        let before_width = self.draw_text(&mut buffer, width, &text_before_cursor, x_offset + char_width, y_offset, self.colors.prompt, &[], self.colors.prompt, font_size);
+        self.draw_text(&mut buffer, width, &query, text_start, y_offset, self.colors.prompt, &[], self.colors.prompt, font_size);
         
-        let cursor_x = x_offset + char_width + before_width - 1;
+        let cursor_offset = self.measure_text(&text_before_cursor, font_size);
+        let cursor_x = text_start + cursor_offset;
         let cursor_height = (font_size * 1.2) as i32;
-        let cursor_y = y_offset - font_size as i32 + 2;
+        let cursor_y = y_offset - font_size as i32;
         self.fill_rect(&mut buffer, width, cursor_x, cursor_y, 2, cursor_height, self.colors.prompt);
-        
-        let after_start = cursor_x + 3;
-        self.draw_text(&mut buffer, width, &text_after_cursor, after_start, y_offset, self.colors.prompt, &[], self.colors.prompt, font_size);
         
         x_offset += (width as i32 / 4).saturating_sub(x_offset) + 8;
 
+        let right_padding = char_width;
+        let max_x = width as i32 - right_padding;
+
         let mut visible_count = 0;
-        let mut first_visible_idx = None;
         
         for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
-            if x_offset >= width as i32 {
+            let text_width = self.measure_text(&app.name, font_size) + 12;
+            
+            if x_offset + text_width > max_x {
                 break;
             }
 
@@ -232,8 +237,6 @@ impl App {
                 (self.colors.fg, None)
             };
 
-            let text_width = self.measure_text(&app.name, font_size) + 12;
-
             if let Some(bg) = bg_color {
                 self.fill_rect(&mut buffer, width, x_offset, 0, text_width, height as i32, bg);
             }
@@ -241,9 +244,6 @@ impl App {
             self.draw_text(&mut buffer, width, &app.name, x_offset + 6, y_offset, text_color, &app.match_indices, self.colors.match_hl, font_size);
             x_offset += text_width;
             
-            if first_visible_idx.is_none() {
-                first_visible_idx = Some(i);
-            }
             self.last_visible = i;
             visible_count += 1;
         }
@@ -319,6 +319,40 @@ impl App {
             width += metrics.advance_width as i32;
         }
         width
+    }
+
+    fn find_page_containing(&mut self, results: &[FilteredApp], target_idx: usize, screen_width: u16) -> usize {
+        let dpi_scale = 96.0 / 72.0;
+        let font_size = self.config.appearance.font_size as f32 * dpi_scale;
+        let char_width = self.measure_text("M", font_size);
+        let results_start_x = 4 + (screen_width as i32 / 4).saturating_sub(4) + 8;
+        let right_padding = char_width;
+        let max_x = screen_width as i32 - right_padding;
+        let available_width = max_x - results_start_x;
+
+        let mut page_start = 0;
+        
+        while page_start < results.len() {
+            let mut x = 0;
+            let mut page_end = page_start;
+            
+            for i in page_start..results.len() {
+                let item_width = self.measure_text(&results[i].name, font_size) + 12;
+                if x + item_width > available_width {
+                    break;
+                }
+                x += item_width;
+                page_end = i;
+            }
+            
+            if target_idx >= page_start && target_idx <= page_end {
+                return page_start;
+            }
+            
+            page_start = page_end + 1;
+        }
+        
+        0
     }
 
     fn launch_selected(&mut self, results: &[FilteredApp]) -> bool {
@@ -406,14 +440,16 @@ impl App {
             }
             keysym::LEFT => {
                 if self.cursor_in_results {
-                    if self.selected > 0 {
-                        if self.selected == self.scroll_offset && self.scroll_offset > 0 {
-                            let prev_page_start = self.scroll_offset.saturating_sub(self.page_size.max(1));
-                            self.scroll_offset = prev_page_start;
+                    if self.selected > 1 {
+                        let new_selected = self.selected - 1;
+                        if new_selected < self.scroll_offset {
+                            self.scroll_offset = self.find_page_containing(&results, new_selected, self.screen_width);
                         }
-                        self.selected -= 1;
+                        self.selected = new_selected;
                     } else {
                         self.cursor_in_results = false;
+                        self.selected = 0;
+                        self.scroll_offset = 0;
                     }
                 } else if self.cursor_pos > 0 {
                     self.cursor_pos -= 1;
@@ -647,7 +683,7 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) -> Result<()
         conn.flush()?;
     }
 
-    let mut app = App::new(config, frequency, apps, keymap);
+    let mut app = App::new(config, frequency, apps, keymap, width);
 
     let mut ctx = X11Context {
         conn,
