@@ -413,11 +413,12 @@ impl App {
                     }
 
                     let subpx_idx = (py * metrics.width + px) * 3;
-                    let alpha_r = bitmap[subpx_idx] as f32 / 255.0;
-                    let alpha_g = bitmap[subpx_idx + 1] as f32 / 255.0;
-                    let alpha_b = bitmap[subpx_idx + 2] as f32 / 255.0;
+                    let alpha_r = bitmap[subpx_idx] as f32;
+                    let alpha_g = bitmap[subpx_idx + 1] as f32;
+                    let alpha_b = bitmap[subpx_idx + 2] as f32;
+                    let alpha = (alpha_r + alpha_g + alpha_b) / (3.0 * 255.0);
 
-                    if alpha_r == 0.0 && alpha_g == 0.0 && alpha_b == 0.0 {
+                    if alpha == 0.0 {
                         continue;
                     }
 
@@ -426,15 +427,12 @@ impl App {
                         continue;
                     }
 
-                    buffer[idx] = (glyph_color.2 as f32 * alpha_b
-                        + buffer[idx] as f32 * (1.0 - alpha_b))
-                        as u8;
-                    buffer[idx + 1] = (glyph_color.1 as f32 * alpha_g
-                        + buffer[idx + 1] as f32 * (1.0 - alpha_g))
-                        as u8;
-                    buffer[idx + 2] = (glyph_color.0 as f32 * alpha_r
-                        + buffer[idx + 2] as f32 * (1.0 - alpha_r))
-                        as u8;
+                    let inv = 1.0 - alpha;
+                    buffer[idx] = (glyph_color.2 as f32 * alpha + buffer[idx] as f32 * inv) as u8;
+                    buffer[idx + 1] =
+                        (glyph_color.1 as f32 * alpha + buffer[idx + 1] as f32 * inv) as u8;
+                    buffer[idx + 2] =
+                        (glyph_color.0 as f32 * alpha + buffer[idx + 2] as f32 * inv) as u8;
                 }
             }
 
@@ -506,11 +504,12 @@ impl App {
                     }
 
                     let subpx_idx = (py * metrics.width + px) * 3;
-                    let alpha_r = bitmap[subpx_idx] as f32 / 255.0;
-                    let alpha_g = bitmap[subpx_idx + 1] as f32 / 255.0;
-                    let alpha_b = bitmap[subpx_idx + 2] as f32 / 255.0;
+                    let alpha_r = bitmap[subpx_idx] as f32;
+                    let alpha_g = bitmap[subpx_idx + 1] as f32;
+                    let alpha_b = bitmap[subpx_idx + 2] as f32;
+                    let alpha = (alpha_r + alpha_g + alpha_b) / (3.0 * 255.0);
 
-                    if alpha_r == 0.0 && alpha_g == 0.0 && alpha_b == 0.0 {
+                    if alpha == 0.0 {
                         continue;
                     }
 
@@ -519,15 +518,12 @@ impl App {
                         continue;
                     }
 
-                    buffer[idx] = (glyph_color.2 as f32 * alpha_b
-                        + buffer[idx] as f32 * (1.0 - alpha_b))
-                        as u8;
-                    buffer[idx + 1] = (glyph_color.1 as f32 * alpha_g
-                        + buffer[idx + 1] as f32 * (1.0 - alpha_g))
-                        as u8;
-                    buffer[idx + 2] = (glyph_color.0 as f32 * alpha_r
-                        + buffer[idx + 2] as f32 * (1.0 - alpha_r))
-                        as u8;
+                    let inv = 1.0 - alpha;
+                    buffer[idx] = (glyph_color.2 as f32 * alpha + buffer[idx] as f32 * inv) as u8;
+                    buffer[idx + 1] =
+                        (glyph_color.1 as f32 * alpha + buffer[idx + 1] as f32 * inv) as u8;
+                    buffer[idx + 2] =
+                        (glyph_color.0 as f32 * alpha + buffer[idx + 2] as f32 * inv) as u8;
                 }
             }
 
