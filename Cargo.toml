@@ -15,7 +15,7 @@ egui = { version = "0.33", optional = true }
 egui_sdl2_gl = { version = "0.33", default-features = false, features = ["sdl2_use-pkgconfig"], optional = true }
 sdl2 = { version = "0.37", features = ["use-pkgconfig"], optional = true }
 
-x11rb = { version = "0.13", features = ["allow-unsafe-code", "shm"], optional = true }
+x11rb = { version = "0.13", features = ["allow-unsafe-code", "shm", "randr"], optional = true }
 fontdue = { version = "0.9", optional = true }
 
 [features]

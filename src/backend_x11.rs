@@ -8,6 +8,7 @@ use crate::frequency::Frequency;
 use crate::launcher;
 
 use x11rb::connection::Connection;
+use x11rb::protocol::randr::ConnectionExt as RandrConnectionExt;
 use x11rb::protocol::xproto::*;
 use x11rb::protocol::Event;
 use x11rb::wrapper::ConnectionExt as _;
@@ -735,6 +736,98 @@ fn compute_window_height(font: &Font, font_size: f32) -> u16 {
     }
 }
 
+struct MonitorGeometry {
+    x: i16,
+    y: i16,
+    width: u16,
+}
+
+/// Detect the monitor containing the currently focused window using RandR.
+/// Falls back to full screen width at (0, 0) if anything fails.
+fn get_active_monitor(
+    conn: &impl Connection,
+    root: Window,
+    screen_width: u16,
+) -> MonitorGeometry {
+    let fallback = MonitorGeometry {
+        x: 0,
+        y: 0,
+        width: screen_width,
+    };
+
+    // Get the currently focused window
+    let focus = match conn.get_input_focus() {
+        Ok(cookie) => match cookie.reply() {
+            Ok(reply) => reply.focus,
+            Err(_) => return fallback,
+        },
+        Err(_) => return fallback,
+    };
+
+    // Root or None means no usable focused window
+    if focus == root || focus == 0 {
+        return fallback;
+    }
+
+    // Translate the focused window origin to root coordinates
+    let (focus_x, focus_y) = match conn.translate_coordinates(focus, root, 0, 0) {
+        Ok(cookie) => match cookie.reply() {
+            Ok(reply) => (reply.dst_x as i32, reply.dst_y as i32),
+            Err(_) => return fallback,
+        },
+        Err(_) => return fallback,
+    };
+
+    // Query RandR for monitor/CRTC info
+    let resources = match conn.randr_get_screen_resources_current(root) {
+        Ok(cookie) => match cookie.reply() {
+            Ok(reply) => reply,
+            Err(_) => return fallback,
+        },
+        Err(_) => return fallback,
+    };
+
+    let mut best: Option<MonitorGeometry> = None;
+    for &crtc in &resources.crtcs {
+        let info = match conn.randr_get_crtc_info(crtc, 0) {
+            Ok(cookie) => match cookie.reply() {
+                Ok(info) => info,
+                Err(_) => continue,
+            },
+            Err(_) => continue,
+        };
+
+        // Skip disabled outputs (width/height 0)
+        if info.width == 0 || info.height == 0 {
+            continue;
+        }
+
+        let cx = info.x as i32;
+        let cy = info.y as i32;
+        let cw = info.width as i32;
+        let ch = info.height as i32;
+
+        if focus_x >= cx && focus_x < cx + cw && focus_y >= cy && focus_y < cy + ch {
+            return MonitorGeometry {
+                x: info.x,
+                y: info.y,
+                width: info.width,
+            };
+        }
+
+        // Track the first valid monitor as fallback
+        if best.is_none() {
+            best = Some(MonitorGeometry {
+                x: info.x,
+                y: info.y,
+                width: info.width,
+            });
+        }
+    }
+
+    best.unwrap_or(fallback)
+}
+
 pub fn run(
     config: Config,
     frequency: Frequency,
@@ -743,10 +836,14 @@ pub fn run(
     let (conn, screen_num) = x11rb::connect(None)?;
     let setup = conn.setup();
     let screen = &setup.roots[screen_num];
-    let width = screen.width_in_pixels;
     let root = screen.root;
     let depth = screen.root_depth;
     let visual = screen.root_visual;
+
+    let monitor = get_active_monitor(&conn, root, screen.width_in_pixels);
+    let mon_x = monitor.x;
+    let mon_y = monitor.y;
+    let width = monitor.width;
 
     let dpi_scale = config.appearance.dpi as f32 / 72.0;
 
@@ -764,8 +861,8 @@ pub fn run(
         depth,
         win_id,
         root,
-        0,
-        0,
+        mon_x,
+        mon_y,
         width,
         window_height,
         0,
@@ -793,9 +890,9 @@ pub fn run(
     )?;
 
     let size_hints: [u32; 18] = [
-        5, // flags: USPosition | PPosition
-        0, // x
-        0, // y
+        5,              // flags: USPosition | PPosition
+        mon_x as u32,   // x
+        mon_y as u32,   // y
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
     conn.change_property32(
@@ -875,7 +972,7 @@ pub fn run(
         win_id,
         net_wm_strut,
         AtomEnum::CARDINAL,
-        &[0, 0, window_height as u32, 0],
+        &[0, 0, (mon_y as u32) + (window_height as u32), 0],
     )?;
 
     let net_wm_strut_partial = conn
@@ -890,14 +987,14 @@ pub fn run(
         &[
             0,
             0,
-            window_height as u32,
+            (mon_y as u32) + (window_height as u32),
             0,
             0,
             0,
             0,
             0,
-            0,
-            width as u32,
+            mon_x as u32,
+            (mon_x as u32) + (width as u32) - 1,
             0,
             0,
         ],
