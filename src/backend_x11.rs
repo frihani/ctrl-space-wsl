@@ -727,6 +727,10 @@ impl X11Context {
     }
 }
 
+fn is_xwayland() -> bool {
+    std::env::var("WAYLAND_DISPLAY").is_ok()
+}
+
 fn compute_window_height(font: &Font, font_size: f32) -> u16 {
     // Upper padding of 2px and lower padding of 2px
     if let Some(metrics) = font.horizontal_line_metrics(font_size) {
@@ -744,11 +748,7 @@ struct MonitorGeometry {
 
 /// Detect the monitor containing the currently focused window using RandR.
 /// Falls back to full screen width at (0, 0) if anything fails.
-fn get_active_monitor(
-    conn: &impl Connection,
-    root: Window,
-    screen_width: u16,
-) -> MonitorGeometry {
+fn get_active_monitor(conn: &impl Connection, root: Window, screen_width: u16) -> MonitorGeometry {
     let fallback = MonitorGeometry {
         x: 0,
         y: 0,
@@ -857,6 +857,22 @@ pub fn run(
     let win_id = conn.generate_id()?;
     let gc_id = conn.generate_id()?;
 
+    let xwayland = is_xwayland();
+
+    let mut win_aux = CreateWindowAux::new()
+        .background_pixel(screen.black_pixel)
+        .event_mask(
+            EventMask::EXPOSURE
+                | EventMask::KEY_PRESS
+                | EventMask::KEY_RELEASE
+                | EventMask::STRUCTURE_NOTIFY
+                | EventMask::FOCUS_CHANGE,
+        );
+
+    if !xwayland {
+        win_aux = win_aux.override_redirect(1);
+    }
+
     conn.create_window(
         depth,
         win_id,
@@ -868,15 +884,7 @@ pub fn run(
         0,
         WindowClass::INPUT_OUTPUT,
         visual,
-        &CreateWindowAux::new()
-            .background_pixel(screen.black_pixel)
-            .event_mask(
-                EventMask::EXPOSURE
-                    | EventMask::KEY_PRESS
-                    | EventMask::KEY_RELEASE
-                    | EventMask::STRUCTURE_NOTIFY
-                    | EventMask::FOCUS_CHANGE,
-            ),
+        &win_aux,
     )?;
 
     conn.create_gc(gc_id, win_id, &CreateGCAux::new())?;
@@ -890,10 +898,24 @@ pub fn run(
     )?;
 
     let size_hints: [u32; 18] = [
-        5,              // flags: USPosition | PPosition
-        mon_x as u32,   // x
-        mon_y as u32,   // y
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        5,            // flags: USPosition | PPosition
+        mon_x as u32, // x
+        mon_y as u32, // y
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
     ];
     conn.change_property32(
         PropMode::REPLACE,
