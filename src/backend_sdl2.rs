@@ -10,6 +10,12 @@ use egui_sdl2_gl::{DpiScaling, ShaderVersion};
 const WINDOW_HEIGHT: u32 = 28;
 
 pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) {
+    let clear_color: egui::Color32 = parse_hex_color(&config.appearance.background)
+        .map(Into::into)
+        .unwrap_or(egui::Color32::from_rgb(33, 34, 44));
+
+    sdl2::hint::set("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR", "0");
+
     let sdl_context = sdl2::init().expect("Failed to init SDL2");
     let video_subsystem = sdl_context.video().expect("Failed to init SDL2 video");
 
@@ -38,24 +44,20 @@ pub fn run(config: Config, frequency: Frequency, apps: Vec<String>) {
         .gl_create_context()
         .expect("Failed to create GL context");
 
-    sdl_context.mouse().show_cursor(false);
-
-    let shader_ver = ShaderVersion::Default;
-
     let (mut painter, mut egui_state) = egui_sdl2_gl::with_sdl2(
         &window,
-        shader_ver,
+        ShaderVersion::Default,
         DpiScaling::Custom((96.0 / 72.0) as f32),
     );
 
-    let egui_ctx = egui::Context::default();
-    let mut event_pump = sdl_context.event_pump().expect("Failed to get event pump");
-
+    let _ = video_subsystem.gl_set_swap_interval(SwapInterval::Immediate);
+    painter.paint_jobs(Some(clear_color), Default::default(), vec![]);
+    window.gl_swap_window();
     let _ = video_subsystem.gl_set_swap_interval(SwapInterval::VSync);
 
-    let clear_color: egui::Color32 = parse_hex_color(&config.appearance.background)
-        .map(Into::into)
-        .unwrap_or(egui::Color32::from_rgb(33, 34, 44));
+    sdl_context.mouse().show_cursor(false);
+    let egui_ctx = egui::Context::default();
+    let mut event_pump = sdl_context.event_pump().expect("Failed to get event pump");
 
     let mut app = LauncherApp::new(config, apps, frequency);
     let mut window_hidden = false;
