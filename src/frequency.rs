@@ -75,7 +75,9 @@ impl Frequency {
             fs::create_dir_all(parent)?;
         }
         let mut file = File::create(&self.path)?;
-        for (name, count) in &self.counts {
+        let mut entries: Vec<_> = self.counts.iter().collect();
+        entries.sort_by_key(|(name, _)| name.as_str());
+        for (name, count) in entries {
             writeln!(file, "{}\t{}", name, count)?;
         }
         Ok(())
@@ -99,15 +101,24 @@ impl Frequency {
                 }
             }
 
-            for app in apps {
-                counts.entry(app).or_insert(0);
+            let has_new = apps.iter().any(|a| !counts.contains_key(a));
+            for app in &apps {
+                counts.entry(app.clone()).or_insert(0);
+            }
+
+            // Only rewrite if new apps were discovered
+            if !has_new {
+                dirty.store(true, Ordering::Relaxed);
+                return;
             }
 
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
             if let Ok(mut file) = File::create(&path) {
-                for (name, count) in &counts {
+                let mut entries: Vec<_> = counts.iter().collect();
+                entries.sort_by_key(|(name, _)| name.as_str());
+                for (name, count) in entries {
                     let _ = writeln!(file, "{}\t{}", name, count);
                 }
             }
