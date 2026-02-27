@@ -519,13 +519,13 @@ impl App {
         0
     }
 
-    fn launch_selected(&mut self, results: &[FilteredApp]) -> bool {
+    fn launch_selected(&mut self, results: &[FilteredApp]) -> Option<bool> {
         let command = if let Some(app) = results.get(self.selected) {
             app.name.clone()
         } else if !self.query.trim().is_empty() {
             self.query.clone()
         } else {
-            return true;
+            return Some(true);
         };
 
         let result = launcher::launch_command(&command);
@@ -533,7 +533,11 @@ impl App {
             self.frequency.increment(&result.command);
             let _ = self.frequency.save();
         }
-        true
+        if result.needs_delay {
+            None // Signal to hide window and delay before exit
+        } else {
+            Some(true)
+        }
     }
 
     fn handle_key(&mut self, keycode: u8, state: u16) -> Option<bool> {
@@ -570,10 +574,10 @@ impl App {
 
         match keysym {
             keysym::ESCAPE => Some(true),
-            keysym::RETURN | keysym::KP_ENTER => {
-                self.launch_selected(&results);
-                Some(true)
-            }
+            keysym::RETURN | keysym::KP_ENTER => match self.launch_selected(&results) {
+                Some(quit) => Some(quit),
+                None => Some(false), // Signal: hide, delay, then quit
+            },
             keysym::TAB => {
                 if let Some(app) = results.get(self.selected) {
                     self.query = app.name.clone();
@@ -980,6 +984,12 @@ pub fn run(
             Event::KeyPress(e) => {
                 if let Some(should_quit) = app.handle_key(e.detail, e.state.into()) {
                     if should_quit {
+                        break;
+                    } else {
+                        // Hide window, delay for Windows exe, then exit
+                        ctx.conn.unmap_window(ctx.win_id)?;
+                        ctx.conn.flush()?;
+                        std::thread::sleep(std::time::Duration::from_millis(500));
                         break;
                     }
                 }
