@@ -17,6 +17,7 @@ pub struct Appearance {
     pub selection_bg: String,
     pub match_highlight: String,
     pub prompt_color: String,
+    pub args_color: String,
     pub font_family: String,
     pub font_size: u8,
 }
@@ -30,6 +31,7 @@ impl Default for Appearance {
             selection_bg: "#6272A4".to_string(),
             match_highlight: "#8be9fd".to_string(),
             prompt_color: "#BD93F9".to_string(),
+            args_color: "#FF79C6".to_string(),
             font_family: "Monospace".to_string(),
             font_size: 10,
         }
