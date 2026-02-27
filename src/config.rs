@@ -20,6 +20,7 @@ pub struct Appearance {
     pub args_color: String,
     pub font_family: String,
     pub font_size: u8,
+    pub dpi: u16,
 }
 
 impl Default for Appearance {
@@ -34,6 +35,7 @@ impl Default for Appearance {
             args_color: "#FF79C6".to_string(),
             font_family: "Monospace".to_string(),
             font_size: 10,
+            dpi: 96,
         }
     }
 }

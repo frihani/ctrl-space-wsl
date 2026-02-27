@@ -134,7 +134,20 @@ struct App {
     screen_width: u16,
 }
 
-fn load_font(font_family: &str) -> Option<Font> {
+fn resolve_font_path(font_family: &str) -> Option<String> {
+    let cache_dir = crate::config::config_dir();
+    let cache_file = cache_dir.join("font_cache");
+
+    if let Ok(content) = fs::read_to_string(&cache_file) {
+        for line in content.lines() {
+            if let Some((family, path)) = line.split_once('\t') {
+                if family == font_family && std::path::Path::new(path).exists() {
+                    return Some(path.to_string());
+                }
+            }
+        }
+    }
+
     let output = Command::new("fc-match")
         .args([font_family, "--format=%{file}"])
         .output()
@@ -143,11 +156,21 @@ fn load_font(font_family: &str) -> Option<Font> {
         return None;
     }
     let path = String::from_utf8(output.stdout).ok()?;
-    let path = path.trim();
+    let path = path.trim().to_string();
     if path.is_empty() {
         return None;
     }
-    let data = fs::read(path).ok()?;
+
+    let _ = fs::create_dir_all(&cache_dir);
+    let entry = format!("{}\t{}\n", font_family, path);
+    let _ = fs::write(&cache_file, entry);
+
+    Some(path)
+}
+
+fn load_font(font_family: &str) -> Option<Font> {
+    let path = resolve_font_path(font_family)?;
+    let data = fs::read(&path).ok()?;
     Font::from_bytes(data, FontSettings::default()).ok()
 }
 
@@ -202,7 +225,7 @@ impl App {
             pixel[3] = 255;
         }
 
-        let dpi_scale: f32 = 96.0 / 72.0;
+        let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
         let font_size = self.config.appearance.font_size as f32 * dpi_scale;
         let height_f = height as f32;
         let baseline = ((height_f - font_size) / 2.0) + font_size - 2.0;
@@ -540,7 +563,7 @@ impl App {
         target_idx: usize,
         screen_width: u16,
     ) -> usize {
-        let dpi_scale: f32 = 96.0 / 72.0;
+        let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
         let font_size = self.config.appearance.font_size as f32 * dpi_scale;
         let char_width = self.measure_text_aa("M", font_size);
         let x_start: f32 = 4.0;
@@ -791,14 +814,6 @@ pub fn run(
     frequency: Frequency,
     apps: Vec<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Load font early to compute window height before connecting to X11
-    let font = load_font(&config.appearance.font_family)
-        .unwrap_or_else(|| panic!("Font '{}' not found", config.appearance.font_family));
-
-    let dpi_scale: f32 = 96.0 / 72.0;
-    let font_size = config.appearance.font_size as f32 * dpi_scale;
-    let window_height = compute_window_height(&font, font_size);
-
     let (conn, screen_num) = x11rb::connect(None)?;
     let setup = conn.setup();
     let screen = &setup.roots[screen_num];
@@ -806,6 +821,13 @@ pub fn run(
     let root = screen.root;
     let depth = screen.root_depth;
     let visual = screen.root_visual;
+
+    let dpi_scale = config.appearance.dpi as f32 / 72.0;
+
+    let font = load_font(&config.appearance.font_family)
+        .unwrap_or_else(|| panic!("Font '{}' not found", config.appearance.font_family));
+    let font_size = config.appearance.font_size as f32 * dpi_scale;
+    let window_height = compute_window_height(&font, font_size);
 
     let keymap = KeyboardMap::new(&conn, setup)?;
 
@@ -1010,10 +1032,6 @@ pub fn run(
         current_width: width,
         current_height: window_height,
     };
-
-    // Try a first render
-    // let pixels = app.render(ctx.current_width, ctx.current_height);
-    // ctx.redraw(&pixels)?;
 
     loop {
         let event = ctx.conn.wait_for_event()?;
