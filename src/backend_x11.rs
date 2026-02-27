@@ -271,7 +271,7 @@ impl App {
         let scale_i = scale as i32;
         let baseline = (((height as f32 - font_size) / 2.0) + font_size - 2.0 * scale) as i32;
         let char_width = self.measure_text("M", font_size);
-        let mut x_offset: i32 = 4 * scale_i;
+        let mut x_offset: i32 = 2 * scale_i;
 
         if let Some(ref name) = self.delete_confirm {
             let prompt = format!("Delete '{}'? (y/n)", name);
@@ -489,7 +489,7 @@ impl App {
         let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
         let font_size = self.config.appearance.font_size as f32 * dpi_scale;
         let char_width = self.measure_text("M", font_size);
-        let x_start: i32 = 4;
+        let x_start: i32 = 2;
         let results_start_x = ((screen_width as i32 / 4) - x_start).max(0) + x_start + 8;
         let right_padding = char_width;
         let max_x = screen_width as i32 - right_padding;
@@ -1035,12 +1035,27 @@ pub fn run(
         &wm_hints,
     )?;
 
-    conn.map_window(win_id)?;
-    conn.flush()?;
+    let mut app = App::new(config, frequency, apps, keymap, width, font);
+
+    let mut ctx = X11Context {
+        conn,
+        win_id,
+        gc_id,
+        depth,
+        current_width: width,
+        current_height: window_height,
+    };
+
+    ctx.conn.map_window(win_id)?;
+    ctx.conn.flush()?;
+
+    let pixels = app.render(ctx.current_width, ctx.current_height);
+    ctx.redraw(&pixels)?;
 
     let mut grabbed = false;
     for attempt in 0..100 {
-        let reply = conn
+        let reply = ctx
+            .conn
             .grab_keyboard(
                 false,
                 win_id,
@@ -1063,20 +1078,11 @@ pub fn run(
     }
 
     if !grabbed {
-        let _ = conn.set_input_focus(InputFocus::PARENT, win_id, x11rb::CURRENT_TIME);
-        conn.flush()?;
+        let _ = ctx
+            .conn
+            .set_input_focus(InputFocus::PARENT, win_id, x11rb::CURRENT_TIME);
+        ctx.conn.flush()?;
     }
-
-    let mut app = App::new(config, frequency, apps, keymap, width, font);
-
-    let mut ctx = X11Context {
-        conn,
-        win_id,
-        gc_id,
-        depth,
-        current_width: width,
-        current_height: window_height,
-    };
 
     loop {
         let event = ctx.conn.wait_for_event()?;
@@ -1096,10 +1102,7 @@ pub fn run(
                 )?;
                 ctx.conn.flush()?;
             }
-            Event::Expose(_) => {
-                let pixels = app.render(ctx.current_width, ctx.current_height);
-                ctx.redraw(&pixels)?;
-            }
+            Event::Expose(_) => {}
             Event::KeyPress(e) => {
                 if let Some(should_quit) = app.handle_key(e.detail, e.state.into()) {
                     if should_quit {
