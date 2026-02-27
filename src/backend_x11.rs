@@ -112,7 +112,6 @@ struct CachedColors {
     sel_fg: Rgb,
     match_hl: Rgb,
     prompt: Rgb,
-    args: Rgb,
 }
 
 struct App {
@@ -191,7 +190,6 @@ impl App {
             match_hl: parse_hex_color(&config.appearance.match_highlight)
                 .unwrap_or(Rgb(139, 233, 253)),
             prompt: parse_hex_color(&config.appearance.prompt_color).unwrap_or(Rgb(189, 147, 249)),
-            args: parse_hex_color(&config.appearance.args_color).unwrap_or(Rgb(255, 121, 198)),
         };
 
         Self {
@@ -317,21 +315,13 @@ impl App {
                 );
             }
 
-            let is_known_app = self.apps.contains(&app.name);
-            let args_start = if is_known_app {
-                app.name.len()
-            } else {
-                app.name.find(' ').unwrap_or(app.name.len())
-            };
-            self.draw_text_with_args(
+            self.draw_text_aa(
                 &mut buffer,
                 width,
                 &app.name,
                 x_offset + 6.0,
                 baseline,
                 text_color,
-                self.colors.args,
-                args_start,
                 &app.match_indices,
                 self.colors.match_hl,
                 font_size,
@@ -476,85 +466,6 @@ impl App {
             width += metrics.advance_width;
         }
         width
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn draw_text_with_args(
-        &mut self,
-        buffer: &mut [u8],
-        buf_width: u16,
-        text: &str,
-        x: f32,
-        baseline: f32,
-        cmd_color: Rgb,
-        args_color: Rgb,
-        args_start_byte: usize,
-        match_indices: &[usize],
-        highlight: Rgb,
-        font_size: f32,
-    ) -> f32 {
-        let mut cursor_x = x;
-        let px_size = font_size as u32;
-        let row_count = buffer.len() / (buf_width as usize * 4);
-
-        let mut byte_pos = 0;
-        for (i, ch) in text.chars().enumerate() {
-            let in_args = byte_pos >= args_start_byte;
-            let base_color = if in_args { args_color } else { cmd_color };
-            let glyph_color = if match_indices.contains(&i) {
-                highlight
-            } else {
-                base_color
-            };
-
-            let (metrics, bitmap) = self
-                .glyph_cache
-                .entry((ch, px_size))
-                .or_insert_with(|| self.font.rasterize_subpixel(ch, font_size));
-
-            let metrics = *metrics;
-            let bitmap = bitmap.clone();
-
-            let gx = (cursor_x + metrics.xmin as f32).round() as i32;
-            let gy = (baseline - metrics.height as f32 - metrics.ymin as f32).round() as i32;
-
-            for py in 0..metrics.height {
-                for px in 0..metrics.width {
-                    let dx = gx + px as i32;
-                    let dy = gy + py as i32;
-                    if dx < 0 || dy < 0 || dx >= buf_width as i32 || dy >= row_count as i32 {
-                        continue;
-                    }
-
-                    let subpx_idx = (py * metrics.width + px) * 3;
-                    let alpha_r = bitmap[subpx_idx] as f32;
-                    let alpha_g = bitmap[subpx_idx + 1] as f32;
-                    let alpha_b = bitmap[subpx_idx + 2] as f32;
-                    let alpha = (alpha_r + alpha_g + alpha_b) / (3.0 * 255.0);
-
-                    if alpha == 0.0 {
-                        continue;
-                    }
-
-                    let idx = (dy as usize * buf_width as usize + dx as usize) * 4;
-                    if idx + 3 >= buffer.len() {
-                        continue;
-                    }
-
-                    let inv = 1.0 - alpha;
-                    buffer[idx] = (glyph_color.2 as f32 * alpha + buffer[idx] as f32 * inv) as u8;
-                    buffer[idx + 1] =
-                        (glyph_color.1 as f32 * alpha + buffer[idx + 1] as f32 * inv) as u8;
-                    buffer[idx + 2] =
-                        (glyph_color.0 as f32 * alpha + buffer[idx + 2] as f32 * inv) as u8;
-                }
-            }
-
-            cursor_x += metrics.advance_width;
-            byte_pos += ch.len_utf8();
-        }
-
-        cursor_x - x
     }
 
     fn find_page_containing(

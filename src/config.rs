@@ -17,7 +17,6 @@ pub struct Appearance {
     pub selection_bg: String,
     pub match_highlight: String,
     pub prompt_color: String,
-    pub args_color: String,
     pub font_family: String,
     pub font_size: u8,
     pub dpi: u16,
@@ -32,7 +31,6 @@ impl Default for Appearance {
             selection_bg: "#6272A4".to_string(),
             match_highlight: "#8be9fd".to_string(),
             prompt_color: "#BD93F9".to_string(),
-            args_color: "#FF79C6".to_string(),
             font_family: "Monospace".to_string(),
             font_size: 10,
             dpi: 96,
@@ -69,11 +67,34 @@ pub enum CreateConfigResult {
     NeedsConfirmation(PathBuf),
 }
 
+fn detect_dpi() -> u16 {
+    let output = std::process::Command::new("xdpyinfo").output().ok();
+    if let Some(output) = output {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("resolution:") {
+                    if let Some(dpi_str) = line.split_whitespace().nth(1) {
+                        if let Some(dpi) = dpi_str.split('x').next() {
+                            if let Ok(dpi) = dpi.parse::<u16>() {
+                                return dpi;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    96
+}
+
 pub fn create_default_config(force: bool) -> std::io::Result<CreateConfigResult> {
     let dir = config_dir();
     fs::create_dir_all(&dir)?;
     let path = dir.join("config.toml");
-    let new_content = toml::to_string_pretty(&Config::default()).unwrap_or_default();
+    let mut config = Config::default();
+    config.appearance.dpi = detect_dpi();
+    let new_content = toml::to_string_pretty(&config).unwrap_or_default();
     if path.exists() {
         let existing = fs::read_to_string(&path).unwrap_or_default();
         if existing != new_content && !force {
