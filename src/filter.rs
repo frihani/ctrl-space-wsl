@@ -6,11 +6,24 @@ pub struct FilteredApp {
     pub match_indices: Vec<usize>,
 }
 
-fn fuzzy_match_token(text: &str, token: &str, start_idx: usize) -> Option<(i64, Vec<usize>)> {
-    let text_lower: Vec<char> = text.chars().map(|c| c.to_ascii_lowercase()).collect();
-    let token_lower: Vec<char> = token.chars().map(|c| c.to_ascii_lowercase()).collect();
+fn fuzzy_match_token(
+    text: &str,
+    token: &str,
+    start_idx: usize,
+    case_sensitive: bool,
+) -> Option<(i64, Vec<usize>)> {
+    let text_chars: Vec<char> = if case_sensitive {
+        text.chars().collect()
+    } else {
+        text.chars().map(|c| c.to_ascii_lowercase()).collect()
+    };
+    let token_chars: Vec<char> = if case_sensitive {
+        token.chars().collect()
+    } else {
+        token.chars().map(|c| c.to_ascii_lowercase()).collect()
+    };
 
-    if token_lower.is_empty() {
+    if token_chars.is_empty() {
         return Some((0, vec![]));
     }
 
@@ -78,8 +91,8 @@ fn fuzzy_match_token(text: &str, token: &str, start_idx: usize) -> Option<(i64, 
 
     let mut indices = vec![];
     search(
-        &text_lower,
-        &token_lower,
+        &text_chars,
+        &token_chars,
         0,
         0,
         &mut indices,
@@ -92,7 +105,11 @@ fn fuzzy_match_token(text: &str, token: &str, start_idx: usize) -> Option<(i64, 
     best_score.map(|s| (s, best_indices))
 }
 
-fn match_fragmented(name: &str, tokens: &[&str]) -> Option<(i64, Vec<usize>)> {
+fn match_fragmented(
+    name: &str,
+    tokens: &[&str],
+    case_sensitive: bool,
+) -> Option<(i64, Vec<usize>)> {
     if tokens.is_empty() {
         return Some((0, vec![]));
     }
@@ -107,7 +124,9 @@ fn match_fragmented(name: &str, tokens: &[&str]) -> Option<(i64, Vec<usize>)> {
         }
 
         let remaining = &name[search_start..];
-        if let Some((score, indices)) = fuzzy_match_token(remaining, token, search_start) {
+        if let Some((score, indices)) =
+            fuzzy_match_token(remaining, token, search_start, case_sensitive)
+        {
             total_score += score;
             if let Some(&last_idx) = indices.last() {
                 let char_end = name[..=last_idx].chars().count();
@@ -129,6 +148,8 @@ fn match_fragmented(name: &str, tokens: &[&str]) -> Option<(i64, Vec<usize>)> {
 pub fn filter_apps(apps: &[String], query: &str, frequency: &Frequency) -> Vec<FilteredApp> {
     let tokens: Vec<&str> = query.split_whitespace().collect();
     let query_joined: String = tokens.join(" ");
+    // Smart-case: case-sensitive if query has any uppercase letter
+    let case_sensitive = query.chars().any(|c| c.is_ascii_uppercase());
 
     let mut results: Vec<FilteredApp> = if tokens.is_empty() {
         apps.iter()
@@ -144,16 +165,20 @@ pub fn filter_apps(apps: &[String], query: &str, frequency: &Frequency) -> Vec<F
     } else {
         apps.iter()
             .filter_map(|name| {
-                match_fragmented(name, &tokens).map(|(score, indices)| {
+                match_fragmented(name, &tokens, case_sensitive).map(|(score, indices)| {
                     let freq_score = frequency.get(name) as i64 * 100;
 
-                    let exact_bonus = if name.eq_ignore_ascii_case(&query_joined) {
+                    let exact_bonus = if case_sensitive {
+                        if *name == query_joined { 1_000_000 } else { 0 }
+                    } else if name.eq_ignore_ascii_case(&query_joined) {
                         1_000_000
                     } else {
                         0
                     };
 
-                    let prefix_bonus = if name
+                    let prefix_bonus = if case_sensitive {
+                        if name.starts_with(&query_joined) { 100_000 } else { 0 }
+                    } else if name
                         .to_ascii_lowercase()
                         .starts_with(&query_joined.to_ascii_lowercase())
                     {
@@ -171,6 +196,22 @@ pub fn filter_apps(apps: &[String], query: &str, frequency: &Frequency) -> Vec<F
             })
             .collect()
     };
-    results.sort_by(|a, b| b.score.cmp(&a.score));
+    results.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| sort_key(&a.name).cmp(&sort_key(&b.name)))
+    });
     results
+}
+
+/// Sort key: digits first, then lowercase, then uppercase (0-9 a-z A-Z).
+fn sort_key(name: &str) -> Vec<u8> {
+    name.bytes()
+        .map(|b| match b {
+            b'0'..=b'9' => b - b'0',             // 0..9
+            b'a'..=b'z' => 10 + (b - b'a'),      // 10..35
+            b'A'..=b'Z' => 36 + (b - b'A'),      // 36..61
+            _ => 62 + b,                          // everything else after
+        })
+        .collect()
 }
