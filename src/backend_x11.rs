@@ -14,7 +14,7 @@ use x11rb::wrapper::ConnectionExt as _;
 
 use fontdue::{Font, FontSettings};
 
-const WINDOW_HEIGHT: u16 = 28;
+const WINDOW_HEIGHT: u16 = 30;
 
 mod keysym {
     pub const BACKSPACE: u32 = 0xff08;
@@ -61,31 +61,41 @@ impl KeyboardMap {
         let shift = (state & u16::from(KeyButMask::SHIFT)) != 0;
         let caps = (state & u16::from(KeyButMask::LOCK)) != 0;
 
-        let col = if shift { 1 } else { 0 };
-        let keysym = self.keysyms.get(idx + col).copied().unwrap_or(0);
+        let base_keysym = self.keysyms.get(idx).copied().unwrap_or(0);
+        let shifted_keysym = self.keysyms.get(idx + 1).copied().unwrap_or(0);
 
-        let keysym = if keysym == 0 {
-            self.keysyms.get(idx).copied().unwrap_or(0)
-        } else {
-            keysym
-        };
-
-        if keysym == 0 {
+        if base_keysym == 0 {
             return None;
         }
 
-        let ch = keysym_to_char(keysym, shift ^ caps);
+        let is_letter =
+            (0x61..=0x7a).contains(&base_keysym) || (0x41..=0x5a).contains(&base_keysym);
+
+        let (keysym, ch) = if is_letter {
+            let apply_upper = shift ^ caps;
+            let ch = keysym_to_char(base_keysym, apply_upper);
+            (base_keysym, ch)
+        } else if shift && shifted_keysym != 0 {
+            let ch = keysym_to_char(shifted_keysym, false);
+            (shifted_keysym, ch)
+        } else {
+            let ch = keysym_to_char(base_keysym, false);
+            (base_keysym, ch)
+        };
+
         Some((keysym, ch))
     }
 }
 
-fn keysym_to_char(keysym: u32, shift_or_caps: bool) -> Option<char> {
+fn keysym_to_char(keysym: u32, apply_shift: bool) -> Option<char> {
     if (0x20..=0x7e).contains(&keysym) {
-        let mut ch = keysym as u8 as char;
-        if shift_or_caps && ch.is_ascii_lowercase() {
-            ch = ch.to_ascii_uppercase();
-        } else if shift_or_caps && ch.is_ascii_uppercase() {
-            ch = ch.to_ascii_lowercase();
+        let ch = keysym as u8 as char;
+        if apply_shift {
+            return Some(if ch.is_ascii_lowercase() {
+                ch.to_ascii_uppercase()
+            } else {
+                ch
+            });
         }
         return Some(ch);
     }
@@ -188,26 +198,27 @@ impl App {
 
         let bg = self.colors.bg;
         for pixel in buffer.chunks_exact_mut(4) {
-            pixel[0] = bg.2; // B
-            pixel[1] = bg.1; // G
-            pixel[2] = bg.0; // R
-            pixel[3] = 255; // A
+            pixel[0] = bg.2;
+            pixel[1] = bg.1;
+            pixel[2] = bg.0;
+            pixel[3] = 255;
         }
 
-        let dpi_scale = 96.0 / 72.0;
+        let dpi_scale: f32 = 96.0 / 72.0;
         let font_size = self.config.appearance.font_size as f32 * dpi_scale;
-        let char_width = self.measure_text("M", font_size);
-        let mut x_offset = 4;
-        let y_offset = ((height as f32 - font_size) / 2.0) as i32 + font_size as i32;
+        let height_f = height as f32;
+        let baseline = ((height_f - font_size) / 2.0) + font_size - 2.0;
+        let char_width = self.measure_text_aa("M", font_size);
+        let mut x_offset: f32 = 4.0;
 
         if let Some(ref name) = self.delete_confirm {
             let prompt = format!("Delete '{}'? (y/n)", name);
-            self.draw_text(
+            self.draw_text_aa(
                 &mut buffer,
                 width,
                 &prompt,
                 x_offset + char_width,
-                y_offset,
+                baseline,
                 self.colors.prompt,
                 &[],
                 self.colors.prompt,
@@ -225,43 +236,44 @@ impl App {
         let query = self.query.clone();
         let text_before_cursor: String = query.chars().take(self.cursor_pos).collect();
 
-        self.draw_text(
+        self.draw_text_aa(
             &mut buffer,
             width,
             &query,
             text_start,
-            y_offset,
+            baseline,
             self.colors.prompt,
             &[],
             self.colors.prompt,
             font_size,
         );
 
-        let cursor_offset = self.measure_text(&text_before_cursor, font_size);
+        let cursor_color = Rgb(192, 222, 255);
+        let cursor_offset = self.measure_text_aa(&text_before_cursor, font_size) - 1.0;
         let cursor_x = text_start + cursor_offset;
-        let cursor_height = (font_size * 1.2) as i32;
-        let cursor_y = y_offset - font_size as i32;
-        self.fill_rect(
+        let cursor_y = baseline - font_size;
+        let cursor_height = font_size * 1.4;
+        self.fill_rect_aa(
             &mut buffer,
             width,
             cursor_x,
             cursor_y,
-            2,
+            2.0,
             cursor_height,
-            self.colors.prompt,
+            cursor_color,
         );
 
-        x_offset += (width as i32 / 4).saturating_sub(x_offset) + 8;
+        x_offset = ((width as f32 / 4.0) - x_offset).max(0.0) + x_offset + 8.0;
 
         let right_padding = char_width;
-        let max_x = width as i32 - right_padding;
+        let max_x = width as f32 - right_padding;
 
         let mut visible_count = 0;
 
         for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
-            let text_width = self.measure_text(&app.name, font_size) + 12;
+            let text_width = self.measure_text_aa(&app.name, font_size) + 14.0;
 
-            if x_offset + text_width > max_x {
+            if x_offset + text_width > max_x && visible_count > 0 {
                 break;
             }
 
@@ -272,24 +284,24 @@ impl App {
                 (self.colors.fg, None)
             };
 
-            if let Some(bg) = bg_color {
-                self.fill_rect(
+            if let Some(bg_c) = bg_color {
+                self.fill_rect_aa(
                     &mut buffer,
                     width,
                     x_offset,
-                    0,
+                    0.0,
                     text_width,
-                    height as i32,
-                    bg,
+                    height_f,
+                    bg_c,
                 );
             }
 
-            self.draw_text(
+            self.draw_text_aa(
                 &mut buffer,
                 width,
                 &app.name,
-                x_offset + 6,
-                y_offset,
+                x_offset + 6.0,
+                baseline,
                 text_color,
                 &app.match_indices,
                 self.colors.match_hl,
@@ -307,35 +319,66 @@ impl App {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn fill_rect(&self, buffer: &mut [u8], width: u16, x: i32, y: i32, w: i32, h: i32, color: Rgb) {
-        for py in y.max(0)..(y + h).min(buffer.len() as i32 / (width as i32 * 4)) {
-            for px in x.max(0)..(x + w).min(width as i32) {
-                let idx = (py as usize * width as usize + px as usize) * 4;
-                if idx + 3 < buffer.len() {
-                    buffer[idx] = color.2; // B
-                    buffer[idx + 1] = color.1; // G
-                    buffer[idx + 2] = color.0; // R
-                    buffer[idx + 3] = 255; // A
+    fn fill_rect_aa(
+        &self,
+        buffer: &mut [u8],
+        buf_width: u16,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        color: Rgb,
+    ) {
+        let x_end = x + w;
+        let y_end = y + h;
+
+        let px_start = x.floor() as i32;
+        let px_end = x_end.ceil() as i32;
+        let py_start = y.floor() as i32;
+        let py_end = y_end.ceil() as i32;
+
+        let row_count = buffer.len() as i32 / (buf_width as i32 * 4);
+
+        for py in py_start.max(0)..py_end.min(row_count) {
+            let y_cov = (y_end.min((py + 1) as f32) - y.max(py as f32)).clamp(0.0, 1.0);
+
+            for px in px_start.max(0)..px_end.min(buf_width as i32) {
+                let x_cov = (x_end.min((px + 1) as f32) - x.max(px as f32)).clamp(0.0, 1.0);
+
+                let alpha = x_cov * y_cov;
+                if alpha <= 0.0 {
+                    continue;
                 }
+
+                let idx = (py as usize * buf_width as usize + px as usize) * 4;
+                if idx + 3 >= buffer.len() {
+                    continue;
+                }
+
+                let inv = 1.0 - alpha;
+                buffer[idx] = (color.2 as f32 * alpha + buffer[idx] as f32 * inv) as u8;
+                buffer[idx + 1] = (color.1 as f32 * alpha + buffer[idx + 1] as f32 * inv) as u8;
+                buffer[idx + 2] = (color.0 as f32 * alpha + buffer[idx + 2] as f32 * inv) as u8;
             }
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_text(
+    fn draw_text_aa(
         &mut self,
         buffer: &mut [u8],
-        width: u16,
+        buf_width: u16,
         text: &str,
-        x: i32,
-        y: i32,
+        x: f32,
+        baseline: f32,
         color: Rgb,
         match_indices: &[usize],
         highlight: Rgb,
         font_size: f32,
-    ) -> i32 {
+    ) -> f32 {
         let mut cursor_x = x;
         let px_size = font_size as u32;
+        let row_count = buffer.len() / (buf_width as usize * 4);
 
         for (i, ch) in text.chars().enumerate() {
             let glyph_color = if match_indices.contains(&i) {
@@ -349,8 +392,11 @@ impl App {
                 .entry((ch, px_size))
                 .or_insert_with(|| self.font.rasterize(ch, font_size));
 
-            let gx = cursor_x + metrics.xmin;
-            let gy = y - metrics.height as i32 - metrics.ymin;
+            let metrics = *metrics;
+            let bitmap = bitmap.clone();
+
+            let gx = (cursor_x + metrics.xmin as f32).round() as i32;
+            let gy = (baseline - metrics.height as f32 - metrics.ymin as f32).round() as i32;
 
             for py in 0..metrics.height {
                 for px in 0..metrics.width {
@@ -360,41 +406,38 @@ impl App {
                     }
                     let dx = gx + px as i32;
                     let dy = gy + py as i32;
-                    if dx < 0
-                        || dy < 0
-                        || dx >= width as i32
-                        || dy >= (buffer.len() / (width as usize * 4)) as i32
-                    {
+                    if dx < 0 || dy < 0 || dx >= buf_width as i32 || dy >= row_count as i32 {
                         continue;
                     }
-                    let idx = (dy as usize * width as usize + dx as usize) * 4;
+                    let idx = (dy as usize * buf_width as usize + dx as usize) * 4;
                     if idx + 3 >= buffer.len() {
                         continue;
                     }
                     let a = alpha as f32 / 255.0;
-                    buffer[idx] = (glyph_color.2 as f32 * a + buffer[idx] as f32 * (1.0 - a)) as u8;
+                    let inv = 1.0 - a;
+                    buffer[idx] = (glyph_color.2 as f32 * a + buffer[idx] as f32 * inv) as u8;
                     buffer[idx + 1] =
-                        (glyph_color.1 as f32 * a + buffer[idx + 1] as f32 * (1.0 - a)) as u8;
+                        (glyph_color.1 as f32 * a + buffer[idx + 1] as f32 * inv) as u8;
                     buffer[idx + 2] =
-                        (glyph_color.0 as f32 * a + buffer[idx + 2] as f32 * (1.0 - a)) as u8;
+                        (glyph_color.0 as f32 * a + buffer[idx + 2] as f32 * inv) as u8;
                 }
             }
 
-            cursor_x += metrics.advance_width as i32;
+            cursor_x += metrics.advance_width;
         }
 
         cursor_x - x
     }
 
-    fn measure_text(&mut self, text: &str, font_size: f32) -> i32 {
+    fn measure_text_aa(&mut self, text: &str, font_size: f32) -> f32 {
         let px_size = font_size as u32;
-        let mut width = 0;
+        let mut width: f32 = 0.0;
         for ch in text.chars() {
             let (metrics, _) = self
                 .glyph_cache
                 .entry((ch, px_size))
                 .or_insert_with(|| self.font.rasterize(ch, font_size));
-            width += metrics.advance_width as i32;
+            width += metrics.advance_width;
         }
         width
     }
@@ -405,22 +448,23 @@ impl App {
         target_idx: usize,
         screen_width: u16,
     ) -> usize {
-        let dpi_scale = 96.0 / 72.0;
+        let dpi_scale: f32 = 96.0 / 72.0;
         let font_size = self.config.appearance.font_size as f32 * dpi_scale;
-        let char_width = self.measure_text("M", font_size);
-        let results_start_x = 4 + (screen_width as i32 / 4).saturating_sub(4) + 8;
+        let char_width = self.measure_text_aa("M", font_size);
+        let x_start: f32 = 4.0;
+        let results_start_x = ((screen_width as f32 / 4.0) - x_start).max(0.0) + x_start + 8.0;
         let right_padding = char_width;
-        let max_x = screen_width as i32 - right_padding;
+        let max_x = screen_width as f32 - right_padding;
         let available_width = max_x - results_start_x;
 
         let mut page_start = 0;
 
         while page_start < results.len() {
-            let mut x = 0;
+            let mut x: f32 = 0.0;
             let mut page_end = page_start;
 
             for (i, result) in results.iter().enumerate().skip(page_start) {
-                let item_width = self.measure_text(&result.name, font_size) + 12;
+                let item_width = self.measure_text_aa(&result.name, font_size) + 12.0;
                 if x + item_width > available_width {
                     break;
                 }
