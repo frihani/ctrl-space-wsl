@@ -197,21 +197,22 @@ pub fn filter_apps(apps: &[String], query: &str, frequency: &Frequency) -> Vec<F
             .collect()
     };
     results.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then_with(|| sort_key(&a.name).cmp(&sort_key(&b.name)))
+        b.score.cmp(&a.score).then_with(|| {
+            a.name
+                .bytes()
+                .map(sort_byte)
+                .cmp(b.name.bytes().map(sort_byte))
+        })
     });
     results
 }
 
-/// Sort key: digits first, then lowercase, then uppercase (0-9 a-z A-Z).
-fn sort_key(name: &str) -> Vec<u8> {
-    name.bytes()
-        .map(|b| match b {
-            b'0'..=b'9' => b - b'0',             // 0..9
-            b'a'..=b'z' => 10 + (b - b'a'),      // 10..35
-            b'A'..=b'Z' => 36 + (b - b'A'),      // 36..61
-            _ => 62 + b,                          // everything else after
-        })
-        .collect()
+/// Sort order: digits first, then lowercase, then uppercase (0-9 a-z A-Z).
+fn sort_byte(b: u8) -> (u8, u8) {
+    match b {
+        b'0'..=b'9' => (0, b),
+        b'a'..=b'z' => (1, b),
+        b'A'..=b'Z' => (2, b),
+        _           => (3, b),
+    }
 }
