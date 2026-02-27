@@ -14,8 +14,6 @@ use x11rb::wrapper::ConnectionExt as _;
 
 use fontdue::{Font, FontSettings};
 
-const WINDOW_HEIGHT: u16 = 30;
-
 mod keysym {
     pub const BACKSPACE: u32 = 0xff08;
     pub const TAB: u32 = 0xff09;
@@ -130,7 +128,7 @@ struct App {
     cursor_in_results: bool,
     delete_confirm: Option<String>,
     font: Font,
-    glyph_cache: HashMap<(char, u32), (fontdue::Metrics, Vec<u8>)>,
+    glyph_cache: HashMap<(char, u32), (fontdue::Metrics, Vec<u8>)>, // subpixel: width*3 bytes per row
     colors: CachedColors,
     keymap: KeyboardMap,
     screen_width: u16,
@@ -160,10 +158,8 @@ impl App {
         apps: Vec<String>,
         keymap: KeyboardMap,
         screen_width: u16,
+        font: Font,
     ) -> Self {
-        let font = load_font(&config.appearance.font_family)
-            .unwrap_or_else(|| panic!("Font '{}' not found", config.appearance.font_family));
-
         let colors = CachedColors {
             bg: parse_hex_color(&config.appearance.background).unwrap_or(Rgb(33, 34, 44)),
             fg: parse_hex_color(&config.appearance.foreground).unwrap_or(Rgb(248, 248, 242)),
@@ -298,7 +294,12 @@ impl App {
                 );
             }
 
-            let args_start = app.name.find(' ').unwrap_or(app.name.len());
+            let is_known_app = self.apps.contains(&app.name);
+            let args_start = if is_known_app {
+                app.name.len()
+            } else {
+                app.name.find(' ').unwrap_or(app.name.len())
+            };
             self.draw_text_with_args(
                 &mut buffer,
                 width,
@@ -395,7 +396,7 @@ impl App {
             let (metrics, bitmap) = self
                 .glyph_cache
                 .entry((ch, px_size))
-                .or_insert_with(|| self.font.rasterize(ch, font_size));
+                .or_insert_with(|| self.font.rasterize_subpixel(ch, font_size));
 
             let metrics = *metrics;
             let bitmap = bitmap.clone();
@@ -405,26 +406,35 @@ impl App {
 
             for py in 0..metrics.height {
                 for px in 0..metrics.width {
-                    let alpha = bitmap[py * metrics.width + px];
-                    if alpha == 0 {
-                        continue;
-                    }
                     let dx = gx + px as i32;
                     let dy = gy + py as i32;
                     if dx < 0 || dy < 0 || dx >= buf_width as i32 || dy >= row_count as i32 {
                         continue;
                     }
+
+                    let subpx_idx = (py * metrics.width + px) * 3;
+                    let alpha_r = bitmap[subpx_idx] as f32 / 255.0;
+                    let alpha_g = bitmap[subpx_idx + 1] as f32 / 255.0;
+                    let alpha_b = bitmap[subpx_idx + 2] as f32 / 255.0;
+
+                    if alpha_r == 0.0 && alpha_g == 0.0 && alpha_b == 0.0 {
+                        continue;
+                    }
+
                     let idx = (dy as usize * buf_width as usize + dx as usize) * 4;
                     if idx + 3 >= buffer.len() {
                         continue;
                     }
-                    let a = alpha as f32 / 255.0;
-                    let inv = 1.0 - a;
-                    buffer[idx] = (glyph_color.2 as f32 * a + buffer[idx] as f32 * inv) as u8;
-                    buffer[idx + 1] =
-                        (glyph_color.1 as f32 * a + buffer[idx + 1] as f32 * inv) as u8;
-                    buffer[idx + 2] =
-                        (glyph_color.0 as f32 * a + buffer[idx + 2] as f32 * inv) as u8;
+
+                    buffer[idx] = (glyph_color.2 as f32 * alpha_b
+                        + buffer[idx] as f32 * (1.0 - alpha_b))
+                        as u8;
+                    buffer[idx + 1] = (glyph_color.1 as f32 * alpha_g
+                        + buffer[idx + 1] as f32 * (1.0 - alpha_g))
+                        as u8;
+                    buffer[idx + 2] = (glyph_color.0 as f32 * alpha_r
+                        + buffer[idx + 2] as f32 * (1.0 - alpha_r))
+                        as u8;
                 }
             }
 
@@ -441,7 +451,7 @@ impl App {
             let (metrics, _) = self
                 .glyph_cache
                 .entry((ch, px_size))
-                .or_insert_with(|| self.font.rasterize(ch, font_size));
+                .or_insert_with(|| self.font.rasterize_subpixel(ch, font_size));
             width += metrics.advance_width;
         }
         width
@@ -479,7 +489,7 @@ impl App {
             let (metrics, bitmap) = self
                 .glyph_cache
                 .entry((ch, px_size))
-                .or_insert_with(|| self.font.rasterize(ch, font_size));
+                .or_insert_with(|| self.font.rasterize_subpixel(ch, font_size));
 
             let metrics = *metrics;
             let bitmap = bitmap.clone();
@@ -489,26 +499,35 @@ impl App {
 
             for py in 0..metrics.height {
                 for px in 0..metrics.width {
-                    let alpha = bitmap[py * metrics.width + px];
-                    if alpha == 0 {
-                        continue;
-                    }
                     let dx = gx + px as i32;
                     let dy = gy + py as i32;
                     if dx < 0 || dy < 0 || dx >= buf_width as i32 || dy >= row_count as i32 {
                         continue;
                     }
+
+                    let subpx_idx = (py * metrics.width + px) * 3;
+                    let alpha_r = bitmap[subpx_idx] as f32 / 255.0;
+                    let alpha_g = bitmap[subpx_idx + 1] as f32 / 255.0;
+                    let alpha_b = bitmap[subpx_idx + 2] as f32 / 255.0;
+
+                    if alpha_r == 0.0 && alpha_g == 0.0 && alpha_b == 0.0 {
+                        continue;
+                    }
+
                     let idx = (dy as usize * buf_width as usize + dx as usize) * 4;
                     if idx + 3 >= buffer.len() {
                         continue;
                     }
-                    let a = alpha as f32 / 255.0;
-                    let inv = 1.0 - a;
-                    buffer[idx] = (glyph_color.2 as f32 * a + buffer[idx] as f32 * inv) as u8;
-                    buffer[idx + 1] =
-                        (glyph_color.1 as f32 * a + buffer[idx + 1] as f32 * inv) as u8;
-                    buffer[idx + 2] =
-                        (glyph_color.0 as f32 * a + buffer[idx + 2] as f32 * inv) as u8;
+
+                    buffer[idx] = (glyph_color.2 as f32 * alpha_b
+                        + buffer[idx] as f32 * (1.0 - alpha_b))
+                        as u8;
+                    buffer[idx + 1] = (glyph_color.1 as f32 * alpha_g
+                        + buffer[idx + 1] as f32 * (1.0 - alpha_g))
+                        as u8;
+                    buffer[idx + 2] = (glyph_color.0 as f32 * alpha_r
+                        + buffer[idx + 2] as f32 * (1.0 - alpha_r))
+                        as u8;
                 }
             }
 
@@ -762,11 +781,28 @@ impl X11Context {
     }
 }
 
+fn compute_window_height(font: &Font, font_size: f32) -> u16 {
+    // Upper padding of 2px and lower padding of 2px
+    if let Some(metrics) = font.horizontal_line_metrics(font_size) {
+        (metrics.ascent - metrics.descent).ceil() as u16 + 4
+    } else {
+        (font_size.ceil() as u16) + 4
+    }
+}
+
 pub fn run(
     config: Config,
     frequency: Frequency,
     apps: Vec<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Load font early to compute window height before connecting to X11
+    let font = load_font(&config.appearance.font_family)
+        .unwrap_or_else(|| panic!("Font '{}' not found", config.appearance.font_family));
+
+    let dpi_scale: f32 = 96.0 / 72.0;
+    let font_size = config.appearance.font_size as f32 * dpi_scale;
+    let window_height = compute_window_height(&font, font_size);
+
     let (conn, screen_num) = x11rb::connect(None)?;
     let setup = conn.setup();
     let screen = &setup.roots[screen_num];
@@ -787,7 +823,7 @@ pub fn run(
         0,
         0,
         width,
-        WINDOW_HEIGHT,
+        window_height,
         0,
         WindowClass::INPUT_OUTPUT,
         visual,
@@ -895,7 +931,7 @@ pub fn run(
         win_id,
         net_wm_strut,
         AtomEnum::CARDINAL,
-        &[0, 0, WINDOW_HEIGHT as u32, 0],
+        &[0, 0, window_height as u32, 0],
     )?;
 
     let net_wm_strut_partial = conn
@@ -910,7 +946,7 @@ pub fn run(
         &[
             0,
             0,
-            WINDOW_HEIGHT as u32,
+            window_height as u32,
             0,
             0,
             0,
@@ -968,7 +1004,7 @@ pub fn run(
         conn.flush()?;
     }
 
-    let mut app = App::new(config, frequency, apps, keymap, width);
+    let mut app = App::new(config, frequency, apps, keymap, width, font);
 
     let mut ctx = X11Context {
         conn,
@@ -976,7 +1012,7 @@ pub fn run(
         gc_id,
         depth,
         current_width: width,
-        current_height: WINDOW_HEIGHT,
+        current_height: window_height,
     };
 
     // Try a first render
