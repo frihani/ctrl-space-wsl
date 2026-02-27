@@ -897,6 +897,25 @@ pub fn run(
         b"ctrl-space-wsl",
     )?;
 
+    // WM_CLASS format: "instance\0class\0"
+    conn.change_property8(
+        PropMode::REPLACE,
+        win_id,
+        AtomEnum::WM_CLASS,
+        AtomEnum::STRING,
+        b"ctrl-space-wsl\0ctrl-space-wsl\0",
+    )?;
+
+    let net_wm_pid = conn.intern_atom(false, b"_NET_WM_PID")?.reply()?.atom;
+    let pid = std::process::id();
+    conn.change_property32(
+        PropMode::REPLACE,
+        win_id,
+        net_wm_pid,
+        AtomEnum::CARDINAL,
+        &[pid],
+    )?;
+
     let size_hints: [u32; 18] = [
         5,            // flags: USPosition | PPosition
         mon_x as u32, // x
