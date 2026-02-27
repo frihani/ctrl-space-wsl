@@ -1,17 +1,31 @@
 [package]
 name = "ctrl-space-wsl"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
-egui = "0.33"
-egui_sdl2_gl = { version = "0.33", default-features = false, features = ["sdl2_use-pkgconfig"] }
-sdl2 = { version = "0.37", features = ["use-pkgconfig"] }
 fuzzy-matcher = "0.3"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 dirs = "5"
 libc = "0.2"
+
+# SDL2 backend deps (requires libsdl2-dev: apt install libsdl2-dev)
+egui = { version = "0.33", optional = true }
+egui_sdl2_gl = { version = "0.33", default-features = false, features = ["sdl2_use-pkgconfig"], optional = true }
+sdl2 = { version = "0.37", features = ["use-pkgconfig"], optional = true }
+
+x11rb = { version = "0.13", features = ["allow-unsafe-code", "shm"], optional = true }
+fontdue = { version = "0.9", optional = true }
+
+[features]
+default = ["x11-backend"]
+sdl2-backend = ["dep:egui", "dep:egui_sdl2_gl", "dep:sdl2"]
+x11-backend = ["dep:x11rb", "dep:fontdue"]
+
+[[bin]]
+name = "ctrl-space-wsl"
+path = "src/main.rs"
 
 [profile.release]
 lto = true
