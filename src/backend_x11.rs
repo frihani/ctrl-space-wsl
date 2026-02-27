@@ -520,7 +520,7 @@ impl App {
         0
     }
 
-    fn launch_selected(&mut self, results: &[FilteredApp]) -> Option<bool> {
+    fn launch_selected(&mut self, results: &[FilteredApp], use_terminal: bool) -> Option<bool> {
         let command = if let Some(app) = results.get(self.selected) {
             app.name.clone()
         } else if !self.query.trim().is_empty() {
@@ -529,7 +529,7 @@ impl App {
             return Some(true);
         };
 
-        let result = launcher::launch_command(&command);
+        let result = launcher::launch_command(&command, use_terminal, &self.config);
         if result.success && !result.command.is_empty() {
             self.frequency.increment(&result.command);
             let _ = self.frequency.save();
@@ -575,10 +575,13 @@ impl App {
 
         match keysym {
             keysym::ESCAPE => Some(true),
-            keysym::RETURN | keysym::KP_ENTER => match self.launch_selected(&results) {
-                Some(quit) => Some(quit),
-                None => Some(false), // Signal: hide, delay, then quit
-            },
+            keysym::RETURN | keysym::KP_ENTER => {
+                let use_terminal = (state & u16::from(KeyButMask::SHIFT)) != 0;
+                match self.launch_selected(&results, use_terminal) {
+                    Some(quit) => Some(quit),
+                    None => Some(false), // Signal: hide, delay, then quit
+                }
+            }
             keysym::TAB => {
                 if let Some(app) = results.get(self.selected) {
                     self.query = app.name.clone();

@@ -58,7 +58,29 @@ ctrl-space-wsl --init-config  # Create default config file
 
 - Type to filter
 - `Enter` launch selected
+- `Shift+Enter` launch in terminal (for TUI apps like `top`, `htop`, `vim`)
 - `Tab` autocomplete
 - `Escape` close
 - `Left/Right` navigate
 - `Delete` remove from history
+
+## Configuration
+
+Config file: `~/.config/ctrl-space-wsl/config.toml`
+
+```toml
+[appearance]
+foreground = "#F8F8F2"
+background = "#21222C"
+selection_fg = "#F8F8F2"
+selection_bg = "#6272A4"
+match_highlight = "#8be9fd"
+prompt_color = "#BD93F9"
+font_family = "Monospace"
+font_size = 10
+dpi = 96
+
+[launcher]
+terminal = "x-terminal-emulator -e"  # Linux default
+# terminal = "alacritty.exe -e wsl.exe"      # WSLg from Windows
+```

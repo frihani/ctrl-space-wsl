@@ -169,7 +169,11 @@ pub fn filter_apps(apps: &[String], query: &str, frequency: &Frequency) -> Vec<F
                     let freq_score = frequency.get(name) as i64 * 100;
 
                     let exact_bonus = if case_sensitive {
-                        if *name == query_joined { 1_000_000 } else { 0 }
+                        if *name == query_joined {
+                            1_000_000
+                        } else {
+                            0
+                        }
                     } else if name.eq_ignore_ascii_case(&query_joined) {
                         1_000_000
                     } else {
@@ -177,7 +181,11 @@ pub fn filter_apps(apps: &[String], query: &str, frequency: &Frequency) -> Vec<F
                     };
 
                     let prefix_bonus = if case_sensitive {
-                        if name.starts_with(&query_joined) { 100_000 } else { 0 }
+                        if name.starts_with(&query_joined) {
+                            100_000
+                        } else {
+                            0
+                        }
                     } else if name
                         .to_ascii_lowercase()
                         .starts_with(&query_joined.to_ascii_lowercase())
@@ -213,6 +221,6 @@ fn sort_byte(b: u8) -> (u8, u8) {
         b'0'..=b'9' => (0, b),
         b'a'..=b'z' => (1, b),
         b'A'..=b'Z' => (2, b),
-        _           => (3, b),
+        _ => (3, b),
     }
 }

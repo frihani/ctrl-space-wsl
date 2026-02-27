@@ -6,6 +6,21 @@ use std::path::PathBuf;
 #[serde(default)]
 pub struct Config {
     pub appearance: Appearance,
+    pub launcher: Launcher,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Launcher {
+    pub terminal: String,
+}
+
+impl Default for Launcher {
+    fn default() -> Self {
+        Self {
+            terminal: "x-terminal-emulator -e".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -34,6 +34,7 @@ fn build_highlighted_text(
 }
 
 pub struct LauncherApp {
+    config: Config,
     query: String,
     apps: Vec<String>,
     frequency: Frequency,
@@ -79,6 +80,7 @@ impl LauncherApp {
             .unwrap_or(Color32::from_rgb(189, 147, 249));
         let font_size = config.appearance.font_size as f32;
         Self {
+            config,
             query: String::new(),
             apps,
             frequency,
@@ -115,7 +117,7 @@ impl LauncherApp {
                 .unwrap_or(false)
     }
 
-    fn launch_selected(&mut self, results: &[FilteredApp]) {
+    fn launch_selected(&mut self, results: &[FilteredApp], use_terminal: bool) {
         let command = if let Some(app) = results.get(self.selected) {
             app.name.clone()
         } else if !self.query.trim().is_empty() {
@@ -126,7 +128,7 @@ impl LauncherApp {
         };
 
         self.hide_window = true;
-        let result = launcher::launch_command(&command);
+        let result = launcher::launch_command(&command, use_terminal, &self.config);
         if result.success && !result.command.is_empty() {
             self.frequency.increment(&result.command);
             let _ = self.frequency.save();
@@ -163,7 +165,8 @@ impl LauncherApp {
                 self.should_close = true;
             }
             if ctx.input(|i| i.key_pressed(Key::Enter)) {
-                self.launch_selected(&results);
+                let use_terminal = ctx.input(|i| i.modifiers.shift);
+                self.launch_selected(&results, use_terminal);
             }
             if ctx.input(|i| i.key_pressed(Key::Tab)) {
                 self.complete_selected(&results);

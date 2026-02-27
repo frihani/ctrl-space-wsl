@@ -2,7 +2,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::process::Command;
 
-use crate::config::config_dir;
+use crate::config::{config_dir, Config};
 
 pub struct LaunchResult {
     pub success: bool,
@@ -17,7 +17,7 @@ fn log(msg: &str) {
     }
 }
 
-pub fn launch_command(input: &str) -> LaunchResult {
+pub fn launch_command(input: &str, use_terminal: bool, config: &Config) -> LaunchResult {
     let parts: Vec<&str> = input.split_whitespace().collect();
     if parts.is_empty() {
         return LaunchResult {
@@ -38,11 +38,32 @@ pub fn launch_command(input: &str) -> LaunchResult {
     let is_windows_exe = resolved_program.to_lowercase().ends_with(".exe");
 
     log(&format!(
-        "launching: {} -> {} (windows_exe={})",
-        program, resolved_program, is_windows_exe
+        "launching: {} -> {} (windows_exe={}, use_terminal={})",
+        program, resolved_program, is_windows_exe, use_terminal
     ));
 
-    let result = if is_windows_exe {
+    let result = if use_terminal {
+        let terminal_parts: Vec<&str> = config.launcher.terminal.split_whitespace().collect();
+        if terminal_parts.is_empty() {
+            return LaunchResult {
+                success: false,
+                command: String::new(),
+                needs_delay: false,
+            };
+        }
+        let terminal_program = terminal_parts[0];
+        let is_windows_terminal = terminal_program.to_lowercase().ends_with(".exe");
+        let mut cmd = Command::new(terminal_program);
+        cmd.args(&terminal_parts[1..]);
+        cmd.args(&parts);
+        cmd.current_dir(&home);
+        if is_windows_terminal {
+            cmd.stdin(std::process::Stdio::null());
+            cmd.stdout(std::process::Stdio::null());
+            cmd.stderr(std::process::Stdio::null());
+        }
+        cmd.spawn()
+    } else if is_windows_exe {
         let mut cmd = Command::new(&resolved_program);
         cmd.args(&parts[1..]);
         cmd.current_dir(&home);
@@ -58,13 +79,15 @@ pub fn launch_command(input: &str) -> LaunchResult {
         cmd.spawn()
     };
 
+    let needs_delay = use_terminal || is_windows_exe;
+
     match result {
         Ok(_) => {
             log("spawn: ok");
             LaunchResult {
                 success: true,
                 command: normalized_cmd,
-                needs_delay: is_windows_exe,
+                needs_delay,
             }
         }
         Err(e) => {
