@@ -127,7 +127,7 @@ struct App {
     cursor_in_results: bool,
     delete_confirm: Option<String>,
     font: Font,
-    glyph_cache: HashMap<(char, u32), (fontdue::Metrics, Vec<u8>)>, // subpixel: width*3 bytes per row
+    glyph_cache: HashMap<(char, u32), (fontdue::Metrics, Vec<u8>)>,
     colors: CachedColors,
     keymap: KeyboardMap,
     screen_width: u16,
@@ -173,6 +173,40 @@ fn load_font(font_family: &str) -> Option<Font> {
     Font::from_bytes(data, FontSettings::default()).ok()
 }
 
+fn downscale(src: &[u8], src_width: u16, src_height: u16, scale: u16) -> Vec<u8> {
+    let dst_width = src_width / scale;
+    let dst_height = src_height / scale;
+    let mut dst = vec![0u8; dst_width as usize * dst_height as usize * 4];
+    let scale_sq = (scale * scale) as u32;
+
+    for dy in 0..dst_height {
+        for dx in 0..dst_width {
+            let mut r: u32 = 0;
+            let mut g: u32 = 0;
+            let mut b: u32 = 0;
+
+            for sy in 0..scale {
+                for sx in 0..scale {
+                    let src_x = dx * scale + sx;
+                    let src_y = dy * scale + sy;
+                    let src_idx = (src_y as usize * src_width as usize + src_x as usize) * 4;
+                    b += src[src_idx] as u32;
+                    g += src[src_idx + 1] as u32;
+                    r += src[src_idx + 2] as u32;
+                }
+            }
+
+            let dst_idx = (dy as usize * dst_width as usize + dx as usize) * 4;
+            dst[dst_idx] = (b / scale_sq) as u8;
+            dst[dst_idx + 1] = (g / scale_sq) as u8;
+            dst[dst_idx + 2] = (r / scale_sq) as u8;
+            dst[dst_idx + 3] = 255;
+        }
+    }
+
+    dst
+}
+
 impl App {
     fn new(
         config: Config,
@@ -213,6 +247,14 @@ impl App {
     }
 
     fn render(&mut self, width: u16, height: u16) -> Vec<u8> {
+        const SCALE: u16 = 2;
+        let hi_width = width * SCALE;
+        let hi_height = height * SCALE;
+        let hi_buffer = self.render_internal(hi_width, hi_height, SCALE as f32);
+        downscale(&hi_buffer, hi_width, hi_height, SCALE)
+    }
+
+    fn render_internal(&mut self, width: u16, height: u16, scale: f32) -> Vec<u8> {
         let mut buffer = vec![0u8; width as usize * height as usize * 4];
 
         let bg = self.colors.bg;
@@ -224,15 +266,15 @@ impl App {
         }
 
         let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
-        let font_size = self.config.appearance.font_size as f32 * dpi_scale;
-        let height_f = height as f32;
-        let baseline = ((height_f - font_size) / 2.0) + font_size - 2.0;
-        let char_width = self.measure_text_aa("M", font_size);
-        let mut x_offset: f32 = 4.0;
+        let font_size = self.config.appearance.font_size as f32 * dpi_scale * scale;
+        let scale_i = scale as i32;
+        let baseline = (((height as f32 - font_size) / 2.0) + font_size - 2.0 * scale) as i32;
+        let char_width = self.measure_text("M", font_size);
+        let mut x_offset: i32 = 4 * scale_i;
 
         if let Some(ref name) = self.delete_confirm {
             let prompt = format!("Delete '{}'? (y/n)", name);
-            self.draw_text_aa(
+            self.draw_text(
                 &mut buffer,
                 width,
                 &prompt,
@@ -255,7 +297,7 @@ impl App {
         let query = self.query.clone();
         let text_before_cursor: String = query.chars().take(self.cursor_pos).collect();
 
-        self.draw_text_aa(
+        self.draw_text(
             &mut buffer,
             width,
             &query,
@@ -268,29 +310,29 @@ impl App {
         );
 
         let cursor_color = Rgb(192, 222, 255);
-        let cursor_offset = self.measure_text_aa(&text_before_cursor, font_size) - 1.0;
+        let cursor_offset = self.measure_text(&text_before_cursor, font_size) - scale_i;
         let cursor_x = text_start + cursor_offset;
-        let cursor_y = baseline - font_size;
-        let cursor_height = font_size * 1.4;
-        self.fill_rect_aa(
+        let cursor_y = baseline - font_size as i32;
+        let cursor_height = (font_size * 1.4) as i32;
+        self.fill_rect(
             &mut buffer,
             width,
             cursor_x,
             cursor_y,
-            2.0,
+            2 * scale_i,
             cursor_height,
             cursor_color,
         );
 
-        x_offset = ((width as f32 / 4.0) - x_offset).max(0.0) + x_offset + 8.0;
+        x_offset = ((width as i32 / 4) - x_offset).max(0) + x_offset + 8 * scale_i;
 
         let right_padding = char_width;
-        let max_x = width as f32 - right_padding;
+        let max_x = width as i32 - right_padding;
 
         let mut visible_count = 0;
 
         for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
-            let text_width = self.measure_text_aa(&app.name, font_size) + 14.0;
+            let text_width = self.measure_text(&app.name, font_size) + 14 * scale_i;
 
             if x_offset + text_width > max_x && visible_count > 0 {
                 break;
@@ -304,22 +346,22 @@ impl App {
             };
 
             if let Some(bg_c) = bg_color {
-                self.fill_rect_aa(
+                self.fill_rect(
                     &mut buffer,
                     width,
                     x_offset,
-                    0.0,
+                    0,
                     text_width,
-                    height_f,
+                    height as i32,
                     bg_c,
                 );
             }
 
-            self.draw_text_aa(
+            self.draw_text(
                 &mut buffer,
                 width,
                 &app.name,
-                x_offset + 6.0,
+                x_offset + 6 * scale_i,
                 baseline,
                 text_color,
                 &app.match_indices,
@@ -338,63 +380,41 @@ impl App {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn fill_rect_aa(
+    fn fill_rect(
         &self,
         buffer: &mut [u8],
         buf_width: u16,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
         color: Rgb,
     ) {
-        let x_end = x + w;
-        let y_end = y + h;
-
-        let px_start = x.floor() as i32;
-        let px_end = x_end.ceil() as i32;
-        let py_start = y.floor() as i32;
-        let py_end = y_end.ceil() as i32;
-
         let row_count = buffer.len() as i32 / (buf_width as i32 * 4);
 
-        for py in py_start.max(0)..py_end.min(row_count) {
-            let y_cov = (y_end.min((py + 1) as f32) - y.max(py as f32)).clamp(0.0, 1.0);
-
-            for px in px_start.max(0)..px_end.min(buf_width as i32) {
-                let x_cov = (x_end.min((px + 1) as f32) - x.max(px as f32)).clamp(0.0, 1.0);
-
-                let alpha = x_cov * y_cov;
-                if alpha <= 0.0 {
-                    continue;
-                }
-
+        for py in y.max(0)..(y + h).min(row_count) {
+            for px in x.max(0)..(x + w).min(buf_width as i32) {
                 let idx = (py as usize * buf_width as usize + px as usize) * 4;
-                if idx + 3 >= buffer.len() {
-                    continue;
-                }
-
-                let inv = 1.0 - alpha;
-                buffer[idx] = (color.2 as f32 * alpha + buffer[idx] as f32 * inv) as u8;
-                buffer[idx + 1] = (color.1 as f32 * alpha + buffer[idx + 1] as f32 * inv) as u8;
-                buffer[idx + 2] = (color.0 as f32 * alpha + buffer[idx + 2] as f32 * inv) as u8;
+                buffer[idx] = color.2;
+                buffer[idx + 1] = color.1;
+                buffer[idx + 2] = color.0;
             }
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_text_aa(
+    fn draw_text(
         &mut self,
         buffer: &mut [u8],
         buf_width: u16,
         text: &str,
-        x: f32,
-        baseline: f32,
+        x: i32,
+        baseline: i32,
         color: Rgb,
         match_indices: &[usize],
         highlight: Rgb,
         font_size: f32,
-    ) -> f32 {
+    ) -> i32 {
         let mut cursor_x = x;
         let px_size = font_size as u32;
         let row_count = buffer.len() / (buf_width as usize * 4);
@@ -409,13 +429,13 @@ impl App {
             let (metrics, bitmap) = self
                 .glyph_cache
                 .entry((ch, px_size))
-                .or_insert_with(|| self.font.rasterize_subpixel(ch, font_size));
+                .or_insert_with(|| self.font.rasterize(ch, font_size));
 
             let metrics = *metrics;
             let bitmap = bitmap.clone();
 
-            let gx = (cursor_x + metrics.xmin as f32).round() as i32;
-            let gy = (baseline - metrics.height as f32 - metrics.ymin as f32).round() as i32;
+            let gx = cursor_x + metrics.xmin;
+            let gy = baseline - metrics.height as i32 - metrics.ymin;
 
             for py in 0..metrics.height {
                 for px in 0..metrics.width {
@@ -425,21 +445,12 @@ impl App {
                         continue;
                     }
 
-                    let subpx_idx = (py * metrics.width + px) * 3;
-                    let alpha_r = bitmap[subpx_idx] as f32;
-                    let alpha_g = bitmap[subpx_idx + 1] as f32;
-                    let alpha_b = bitmap[subpx_idx + 2] as f32;
-                    let alpha = (alpha_r + alpha_g + alpha_b) / (3.0 * 255.0);
-
+                    let alpha = bitmap[py * metrics.width + px] as f32 / 255.0;
                     if alpha == 0.0 {
                         continue;
                     }
 
                     let idx = (dy as usize * buf_width as usize + dx as usize) * 4;
-                    if idx + 3 >= buffer.len() {
-                        continue;
-                    }
-
                     let inv = 1.0 - alpha;
                     buffer[idx] = (glyph_color.2 as f32 * alpha + buffer[idx] as f32 * inv) as u8;
                     buffer[idx + 1] =
@@ -449,21 +460,21 @@ impl App {
                 }
             }
 
-            cursor_x += metrics.advance_width;
+            cursor_x += metrics.advance_width.round() as i32;
         }
 
         cursor_x - x
     }
 
-    fn measure_text_aa(&mut self, text: &str, font_size: f32) -> f32 {
+    fn measure_text(&mut self, text: &str, font_size: f32) -> i32 {
         let px_size = font_size as u32;
-        let mut width: f32 = 0.0;
+        let mut width: i32 = 0;
         for ch in text.chars() {
             let (metrics, _) = self
                 .glyph_cache
                 .entry((ch, px_size))
-                .or_insert_with(|| self.font.rasterize_subpixel(ch, font_size));
-            width += metrics.advance_width;
+                .or_insert_with(|| self.font.rasterize(ch, font_size));
+            width += metrics.advance_width.round() as i32;
         }
         width
     }
@@ -476,21 +487,21 @@ impl App {
     ) -> usize {
         let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
         let font_size = self.config.appearance.font_size as f32 * dpi_scale;
-        let char_width = self.measure_text_aa("M", font_size);
-        let x_start: f32 = 4.0;
-        let results_start_x = ((screen_width as f32 / 4.0) - x_start).max(0.0) + x_start + 8.0;
+        let char_width = self.measure_text("M", font_size);
+        let x_start: i32 = 4;
+        let results_start_x = ((screen_width as i32 / 4) - x_start).max(0) + x_start + 8;
         let right_padding = char_width;
-        let max_x = screen_width as f32 - right_padding;
+        let max_x = screen_width as i32 - right_padding;
         let available_width = max_x - results_start_x;
 
         let mut page_start = 0;
 
         while page_start < results.len() {
-            let mut x: f32 = 0.0;
+            let mut x: i32 = 0;
             let mut page_end = page_start;
 
             for (i, result) in results.iter().enumerate().skip(page_start) {
-                let item_width = self.measure_text_aa(&result.name, font_size) + 12.0;
+                let item_width = self.measure_text(&result.name, font_size) + 12;
                 if x + item_width > available_width {
                     break;
                 }
