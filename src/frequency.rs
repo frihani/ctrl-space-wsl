@@ -106,7 +106,7 @@ impl Frequency {
                 counts.entry(app.clone()).or_insert(0);
             }
 
-            // Only rewrite if new apps were discovered
+            // Only rewrite if new apps are discovered
             if !has_new {
                 dirty.store(true, Ordering::Relaxed);
                 return;

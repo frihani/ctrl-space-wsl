@@ -2,6 +2,14 @@
 name = "ctrl-space-wsl"
 version = "0.3.0"
 edition = "2021"
+authors = ["Fares Rihani"]
+description = "A fast application launcher for WSL2, inspired by dmenu/yeganesh"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/frihani/ctrl-space-wsl"
+homepage = "https://github.com/frihani/ctrl-space-wsl"
+readme = "README.md"
+keywords = ["launcher", "wsl", "dmenu", "fuzzy", "linux"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 fuzzy-matcher = "0.3"

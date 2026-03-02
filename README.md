@@ -11,6 +11,14 @@ A fast application launcher for WSL2, inspired by dmenu/yeganesh.
 
 ## Installation
 
+### From crates.io
+
+```bash
+cargo install ctrl-space-wsl
+```
+
+### From source
+
 ```bash
 make release
 make install
@@ -28,13 +36,15 @@ cp target/release/ctrl-space-wsl ~/.local/bin/
 Two backends are available:
 
 - **x11** (default) - Lightweight, minimal dependencies
-- **sdl2** - Uses egui/SDL2 for rendering
+- **sdl2** - Uses egui/SDL2 for rendering (requires `libsdl2-dev`)
 
 ```bash
 # Build with X11 backend (default)
 cargo build --release
 
-# Build with SDL2 backend
+# Build with SDL2 backend (requires libsdl2-dev)
+# Debian/Ubuntu: sudo apt install libsdl2-dev
+# Fedora: sudo dnf install SDL2-devel
 cargo build --release --no-default-features --features sdl2-backend
 ```
 
@@ -84,3 +94,7 @@ dpi = 96
 terminal = "x-terminal-emulator -e"  # Linux default
 # terminal = "alacritty.exe -e wsl.exe"      # WSLg from Windows
 ```
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT License](LICENSE-MIT) at your option.
