@@ -145,10 +145,3 @@ pub fn parse_hex_color(hex: &str) -> Option<Rgb> {
     let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
     Some(Rgb(r, g, b))
 }
-
-#[cfg(feature = "sdl2-backend")]
-impl From<Rgb> for egui::Color32 {
-    fn from(rgb: Rgb) -> Self {
-        egui::Color32::from_rgb(rgb.0, rgb.1, rgb.2)
-    }
-}

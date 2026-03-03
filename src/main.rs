@@ -5,14 +5,7 @@ mod frequency;
 mod launcher;
 mod lock;
 
-#[cfg(feature = "x11-backend")]
-#[allow(dead_code)]
 mod backend_x11;
-
-#[cfg(feature = "sdl2-backend")]
-mod backend_sdl2;
-#[cfg(feature = "sdl2-backend")]
-mod ui;
 
 use std::env;
 
@@ -24,14 +17,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn print_info() {
     let dir = config::config_dir();
-    #[cfg(all(feature = "x11-backend", not(feature = "sdl2-backend")))]
-    let backend = "x11";
-    #[cfg(feature = "sdl2-backend")]
-    let backend = "sdl2";
-    #[cfg(not(any(feature = "x11-backend", feature = "sdl2-backend")))]
-    let backend = "unknown";
 
-    println!("ctrl-space-wsl ({})\n", backend);
+
+    println!("ctrl-space-wsl \n");
     println!("Version:          v{}", VERSION);
     println!("Config:           {}", dir.join("config.toml").display());
     println!("Cache:            {}", dir.join("freq.txt").display());
@@ -86,22 +74,8 @@ fn main() {
         frequency.apps()
     };
 
-    #[cfg(all(feature = "x11-backend", not(feature = "sdl2-backend")))]
-    {
-        if let Err(e) = backend_x11::run(config, frequency, apps) {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
-        }
-    }
-
-    #[cfg(feature = "sdl2-backend")]
-    {
-        backend_sdl2::run(config, frequency, apps);
-    }
-
-    #[cfg(not(any(feature = "x11-backend", feature = "sdl2-backend")))]
-    {
-        eprintln!("No backend enabled. Enable x11-backend or sdl2-backend feature.");
+    if let Err(e) = backend_x11::run(config, frequency, apps) {
+        eprintln!("Error: {}", e);
         std::process::exit(1);
     }
 }
