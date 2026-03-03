@@ -24,6 +24,19 @@ mod keysym {
     pub const LEFT: u32 = 0xff51;
     pub const RIGHT: u32 = 0xff53;
     pub const KP_ENTER: u32 = 0xff8d;
+    pub const V_LOWER: u32 = 0x76;
+    pub const V_UPPER: u32 = 0x56;
+    pub const Y_LOWER: u32 = 0x79;
+    pub const Y_UPPER: u32 = 0x59;
+    pub const Z_LOWER: u32 = 0x7a;
+    pub const Z_UPPER: u32 = 0x5a;
+}
+
+enum KeyAction {
+    None,
+    Quit,
+    QuitWithDelay,
+    Paste,
 }
 
 struct KeyboardMap {
@@ -115,6 +128,11 @@ struct CachedColors {
     prompt: Rgb,
 }
 
+struct UndoState {
+    query: String,
+    cursor_pos: usize,
+}
+
 struct App {
     config: Config,
     frequency: Frequency,
@@ -132,6 +150,8 @@ struct App {
     colors: CachedColors,
     keymap: KeyboardMap,
     screen_width: u16,
+    undo_stack: Vec<UndoState>,
+    redo_stack: Vec<UndoState>,
 }
 
 fn resolve_font_path(font_family: &str) -> Option<String> {
@@ -244,6 +264,44 @@ impl App {
             colors,
             keymap,
             screen_width,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+        }
+    }
+
+    fn save_undo(&mut self) {
+        self.undo_stack.push(UndoState {
+            query: self.query.clone(),
+            cursor_pos: self.cursor_pos,
+        });
+        self.redo_stack.clear();
+    }
+
+    fn undo(&mut self) {
+        if let Some(state) = self.undo_stack.pop() {
+            self.redo_stack.push(UndoState {
+                query: self.query.clone(),
+                cursor_pos: self.cursor_pos,
+            });
+            self.query = state.query;
+            self.cursor_pos = state.cursor_pos;
+            self.cursor_in_results = false;
+            self.selected = 0;
+            self.scroll_offset = 0;
+        }
+    }
+
+    fn redo(&mut self) {
+        if let Some(state) = self.redo_stack.pop() {
+            self.undo_stack.push(UndoState {
+                query: self.query.clone(),
+                cursor_pos: self.cursor_pos,
+            });
+            self.query = state.query;
+            self.cursor_pos = state.cursor_pos;
+            self.cursor_in_results = false;
+            self.selected = 0;
+            self.scroll_offset = 0;
         }
     }
 
@@ -541,10 +599,50 @@ impl App {
         }
     }
 
-    fn handle_key(&mut self, keycode: u8, state: u16) -> Option<bool> {
+    fn insert_text(&mut self, text: &str) {
+        self.save_undo();
+        for c in text.chars() {
+            if !c.is_control() {
+                let idx: usize = self
+                    .query
+                    .chars()
+                    .take(self.cursor_pos)
+                    .map(|c| c.len_utf8())
+                    .sum();
+                self.query.insert(idx, c);
+                self.cursor_pos += 1;
+            }
+        }
+        self.cursor_in_results = false;
+        self.selected = 0;
+        self.scroll_offset = 0;
+    }
+
+    fn handle_key(&mut self, keycode: u8, state: u16) -> KeyAction {
         let results = filter_apps(&self.apps, &self.query, &self.frequency);
 
-        let (keysym, ch) = self.keymap.lookup(keycode, state)?;
+        let Some((keysym, ch)) = self.keymap.lookup(keycode, state) else {
+            return KeyAction::None;
+        };
+
+        let ctrl = (state & u16::from(KeyButMask::CONTROL)) != 0;
+        let shift = (state & u16::from(KeyButMask::SHIFT)) != 0;
+
+        if ctrl && (keysym == keysym::V_LOWER || keysym == keysym::V_UPPER) {
+            return KeyAction::Paste;
+        }
+        if ctrl && (keysym == keysym::Z_LOWER || keysym == keysym::Z_UPPER) {
+            if shift {
+                self.redo();
+            } else {
+                self.undo();
+            }
+            return KeyAction::None;
+        }
+        if ctrl && (keysym == keysym::Y_LOWER || keysym == keysym::Y_UPPER) {
+            self.redo();
+            return KeyAction::None;
+        }
 
         if self.delete_confirm.is_some() {
             match ch {
@@ -568,27 +666,25 @@ impl App {
                 }
                 _ => {}
             }
-            return None;
+            return KeyAction::None;
         }
 
         let cursor_at_end = self.cursor_pos >= self.query.chars().count();
 
         match keysym {
-            keysym::ESCAPE => Some(true),
-            keysym::RETURN | keysym::KP_ENTER => {
-                let use_terminal = (state & u16::from(KeyButMask::SHIFT)) != 0;
-                match self.launch_selected(&results, use_terminal) {
-                    Some(quit) => Some(quit),
-                    None => Some(false), // Signal: hide, delay, then quit
-                }
-            }
+            keysym::ESCAPE => KeyAction::Quit,
+            keysym::RETURN | keysym::KP_ENTER => match self.launch_selected(&results, shift) {
+                Some(true) => KeyAction::Quit,
+                Some(false) => KeyAction::Quit,
+                None => KeyAction::QuitWithDelay,
+            },
             keysym::TAB => {
                 if let Some(app) = results.get(self.selected) {
                     self.query = app.name.clone();
                     self.cursor_pos = self.query.chars().count();
                     self.cursor_in_results = false;
                 }
-                None
+                KeyAction::None
             }
             keysym::DELETE => {
                 if let Some(app) = results.get(self.selected) {
@@ -596,10 +692,11 @@ impl App {
                         self.delete_confirm = Some(app.name.clone());
                     }
                 }
-                None
+                KeyAction::None
             }
             keysym::BACKSPACE => {
                 if self.cursor_pos > 0 {
+                    self.save_undo();
                     let idx: usize = self
                         .query
                         .chars()
@@ -618,7 +715,7 @@ impl App {
                     self.selected = 0;
                     self.scroll_offset = 0;
                 }
-                None
+                KeyAction::None
             }
             keysym::LEFT => {
                 if self.cursor_in_results {
@@ -640,7 +737,7 @@ impl App {
                 } else if self.cursor_pos > 0 {
                     self.cursor_pos -= 1;
                 }
-                None
+                KeyAction::None
             }
             keysym::RIGHT => {
                 if self.cursor_in_results {
@@ -656,11 +753,12 @@ impl App {
                 } else if self.cursor_pos < self.query.chars().count() {
                     self.cursor_pos += 1;
                 }
-                None
+                KeyAction::None
             }
             _ => {
                 if let Some(c) = ch {
                     if !c.is_control() {
+                        self.save_undo();
                         let idx: usize = self
                             .query
                             .chars()
@@ -674,7 +772,7 @@ impl App {
                         self.scroll_offset = 0;
                     }
                 }
-                None
+                KeyAction::None
             }
         }
     }
@@ -1057,6 +1155,10 @@ pub fn run(
         &wm_hints,
     )?;
 
+    let clipboard_atom = conn.intern_atom(false, b"CLIPBOARD")?.reply()?.atom;
+    let utf8_string = conn.intern_atom(false, b"UTF8_STRING")?.reply()?.atom;
+    let paste_target = conn.intern_atom(false, b"CTRL_SPACE_PASTE")?.reply()?.atom;
+
     let mut app = App::new(config, frequency, apps, keymap, width, font);
 
     let mut ctx = X11Context {
@@ -1106,6 +1208,8 @@ pub fn run(
         ctx.conn.flush()?;
     }
 
+    let mut paste_pending = false;
+
     loop {
         let event = ctx.conn.wait_for_event()?;
 
@@ -1126,20 +1230,51 @@ pub fn run(
             }
             Event::Expose(_) => {}
             Event::KeyPress(e) => {
-                if let Some(should_quit) = app.handle_key(e.detail, e.state.into()) {
-                    if should_quit {
-                        break;
-                    } else {
-                        // Hide window, delay for Windows exe, then exit
+                match app.handle_key(e.detail, e.state.into()) {
+                    KeyAction::Quit => break,
+                    KeyAction::QuitWithDelay => {
                         ctx.conn.unmap_window(ctx.win_id)?;
                         ctx.conn.flush()?;
                         std::thread::sleep(std::time::Duration::from_millis(500));
                         break;
                     }
+                    KeyAction::Paste => {
+                        ctx.conn.convert_selection(
+                            ctx.win_id,
+                            clipboard_atom,
+                            utf8_string,
+                            paste_target,
+                            x11rb::CURRENT_TIME,
+                        )?;
+                        ctx.conn.flush()?;
+                        paste_pending = true;
+                    }
+                    KeyAction::None => {}
                 }
 
                 let pixels = app.render(ctx.current_width, ctx.current_height);
                 ctx.redraw(&pixels)?;
+            }
+            Event::SelectionNotify(e) => {
+                if paste_pending && e.property != AtomEnum::NONE.into() {
+                    paste_pending = false;
+                    if let Ok(reply) = ctx.conn.get_property(
+                        true,
+                        ctx.win_id,
+                        paste_target,
+                        utf8_string,
+                        0,
+                        u32::MAX,
+                    ) {
+                        if let Ok(prop) = reply.reply() {
+                            if let Ok(text) = String::from_utf8(prop.value) {
+                                app.insert_text(&text);
+                                let pixels = app.render(ctx.current_width, ctx.current_height);
+                                ctx.redraw(&pixels)?;
+                            }
+                        }
+                    }
+                }
             }
             Event::FocusOut(_) => {
                 for _ in 0..50 {
