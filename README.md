@@ -1,5 +1,7 @@
 # ctrl-space-wsl
 
+[![crates.io](https://img.shields.io/crates/v/ctrl-space-wsl.svg)](https://crates.io/crates/ctrl-space-wsl)
+
 A fast application launcher for WSL2, inspired by dmenu/yeganesh.
 
 ## Features
