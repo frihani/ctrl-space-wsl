@@ -91,6 +91,7 @@ prompt_color = "#BD93F9"
 font_family = "Monospace"
 font_size = 10
 dpi = 96
+position = "top"  # "top", "center", or "bottom"
 
 [launcher]
 terminal = "x-terminal-emulator -e"  # Linux default

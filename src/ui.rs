@@ -845,15 +845,22 @@ struct MonitorGeometry {
     x: i16,
     y: i16,
     width: u16,
+    height: u16,
 }
 
 /// Detect the monitor containing the currently focused window using RandR.
 /// Falls back to full screen width at (0, 0) if anything fails.
-fn get_active_monitor(conn: &impl Connection, root: Window, screen_width: u16) -> MonitorGeometry {
+fn get_active_monitor(
+    conn: &impl Connection,
+    root: Window,
+    screen_width: u16,
+    screen_height: u16,
+) -> MonitorGeometry {
     let fallback = MonitorGeometry {
         x: 0,
         y: 0,
         width: screen_width,
+        height: screen_height,
     };
 
     // Get the currently focused window
@@ -913,6 +920,7 @@ fn get_active_monitor(conn: &impl Connection, root: Window, screen_width: u16) -
                 x: info.x,
                 y: info.y,
                 width: info.width,
+                height: info.height,
             };
         }
 
@@ -922,6 +930,7 @@ fn get_active_monitor(conn: &impl Connection, root: Window, screen_width: u16) -
                 x: info.x,
                 y: info.y,
                 width: info.width,
+                height: info.height,
             });
         }
     }
@@ -941,9 +950,10 @@ pub fn run(
     let depth = screen.root_depth;
     let visual = screen.root_visual;
 
-    let monitor = get_active_monitor(&conn, root, screen.width_in_pixels);
-    let mon_x = monitor.x;
+    let monitor = get_active_monitor(&conn, root, screen.width_in_pixels, screen.height_in_pixels);
+    let win_x = monitor.x;
     let mon_y = monitor.y;
+    let mon_height = monitor.height;
     let width = monitor.width;
 
     let dpi_scale = config.appearance.dpi as f32 / 72.0;
@@ -952,6 +962,12 @@ pub fn run(
         .unwrap_or_else(|| panic!("Font '{}' not found", config.appearance.font_family));
     let font_size = config.appearance.font_size as f32 * dpi_scale;
     let window_height = compute_window_height(&font, font_size);
+
+    let win_y: i16 = match config.appearance.position.as_str() {
+        "bottom" => mon_y + mon_height as i16 - window_height as i16,
+        "center" => mon_y + (mon_height as i16 - window_height as i16) / 2,
+        _ => mon_y, // "top" (default)
+    };
 
     let keymap = KeyboardMap::new(&conn, setup)?;
 
@@ -978,8 +994,8 @@ pub fn run(
         depth,
         win_id,
         root,
-        mon_x,
-        mon_y,
+        win_x,
+        win_y,
         width,
         window_height,
         0,
@@ -1019,8 +1035,8 @@ pub fn run(
 
     let size_hints: [u32; 18] = [
         5,            // flags: USPosition | PPosition
-        mon_x as u32, // x
-        mon_y as u32, // y
+        win_x as u32, // x
+        win_y as u32, // y
         0,
         0,
         0,
@@ -1109,38 +1125,77 @@ pub fn run(
     )?;
 
     let net_wm_strut = conn.intern_atom(false, b"_NET_WM_STRUT")?.reply()?.atom;
-    conn.change_property32(
-        PropMode::REPLACE,
-        win_id,
-        net_wm_strut,
-        AtomEnum::CARDINAL,
-        &[0, 0, (mon_y as u32) + (window_height as u32), 0],
-    )?;
-
     let net_wm_strut_partial = conn
         .intern_atom(false, b"_NET_WM_STRUT_PARTIAL")?
         .reply()?
         .atom;
-    conn.change_property32(
-        PropMode::REPLACE,
-        win_id,
-        net_wm_strut_partial,
-        AtomEnum::CARDINAL,
-        &[
-            0,
-            0,
-            (mon_y as u32) + (window_height as u32),
-            0,
-            0,
-            0,
-            0,
-            0,
-            mon_x as u32,
-            (mon_x as u32) + (width as u32) - 1,
-            0,
-            0,
-        ],
-    )?;
+
+    let position = config.appearance.position.as_str();
+    match position {
+        "bottom" => {
+            let bottom_reserve = (screen.height_in_pixels as u32) - (win_y as u32);
+            conn.change_property32(
+                PropMode::REPLACE,
+                win_id,
+                net_wm_strut,
+                AtomEnum::CARDINAL,
+                &[0, 0, 0, bottom_reserve],
+            )?;
+            conn.change_property32(
+                PropMode::REPLACE,
+                win_id,
+                net_wm_strut_partial,
+                AtomEnum::CARDINAL,
+                &[
+                    0,
+                    0,
+                    0,
+                    bottom_reserve,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    win_x as u32,
+                    (win_x as u32) + (width as u32) - 1,
+                ],
+            )?;
+        }
+        "center" => {
+            // No strut reservation for centered position
+        }
+        _ => {
+            // "top" (default)
+            conn.change_property32(
+                PropMode::REPLACE,
+                win_id,
+                net_wm_strut,
+                AtomEnum::CARDINAL,
+                &[0, 0, (win_y as u32) + (window_height as u32), 0],
+            )?;
+            conn.change_property32(
+                PropMode::REPLACE,
+                win_id,
+                net_wm_strut_partial,
+                AtomEnum::CARDINAL,
+                &[
+                    0,
+                    0,
+                    (win_y as u32) + (window_height as u32),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    win_x as u32,
+                    (win_x as u32) + (width as u32) - 1,
+                    0,
+                    0,
+                ],
+            )?;
+        }
+    }
 
     let wm_hints: [u32; 9] = [
         1, // flags: InputHint
