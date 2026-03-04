@@ -5,7 +5,7 @@ mod frequency;
 mod launcher;
 mod lock;
 
-mod backend_x11;
+mod ui;
 
 use std::env;
 
@@ -74,7 +74,7 @@ fn main() {
         frequency.apps()
     };
 
-    if let Err(e) = backend_x11::run(config, frequency, apps) {
+    if let Err(e) = ui::run(config, frequency, apps) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }

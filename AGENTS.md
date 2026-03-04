@@ -8,12 +8,6 @@ make release
 
 Or: `cargo build --release`
 
-Build with SDL2 backend instead of default X11:
-
-```bash
-cargo build --release --no-default-features --features sdl2-backend
-```
-
 ## Format
 
 ```bash
@@ -32,10 +26,8 @@ Run the release binary directly:
 
 ## Project Structure
 
-- `src/main.rs` - Entry point, CLI handling, backend dispatch
-- `src/backend_x11.rs` - X11 backend (default)
-- `src/backend_sdl2.rs` - SDL2/egui backend
-- `src/ui.rs` - UI rendering for SDL2 backend (egui)
+- `src/main.rs` - Entry point, CLI handling
+- `src/ui.rs` - X11 window, rendering, input, event loop
 - `src/filter.rs` - Fuzzy matching and scoring
 - `src/frequency.rs` - Usage tracking and app caching
 - `src/launcher.rs` - Command execution
@@ -49,7 +41,7 @@ Config and data stored in `~/.config/ctrl-space-wsl/`.
 
 Run `ctrl-space-wsl --info` to see file paths.
 
-## X11 Backend Notes
+## X11 Notes (ui.rs)
 
 ### Window Positioning (IMPORTANT)
 
