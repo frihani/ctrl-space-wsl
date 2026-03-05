@@ -228,6 +228,14 @@ fn downscale(src: &[u8], src_width: u16, src_height: u16, scale: u16) -> Vec<u8>
     dst
 }
 
+struct ResultsLayout {
+    font_size: f32,
+    char_width: i32,
+    item_pad: i32,
+    results_x: i32,
+    max_x: i32,
+}
+
 impl App {
     fn new(
         config: Config,
@@ -324,8 +332,9 @@ impl App {
             pixel[3] = 255;
         }
 
-        let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
-        let font_size = self.config.appearance.font_size as f32 * dpi_scale * scale;
+        let layout = self.results_layout(width, scale);
+        let font_size = layout.font_size;
+        let char_width = layout.char_width;
         let scale_i = scale as i32;
         let (line_ascent, line_height) =
             if let Some(m) = self.font.horizontal_line_metrics(font_size) {
@@ -334,8 +343,7 @@ impl App {
                 (font_size * 0.8, font_size)
             };
         let baseline = ((height as f32 - line_height) / 2.0 + line_ascent) as i32;
-        let char_width = self.measure_text("M", font_size);
-        let mut x_offset: i32 = 2 * scale_i;
+        let x_offset: i32 = 2 * scale_i;
 
         if let Some(ref name) = self.delete_confirm {
             let prompt = format!("Delete '{}'? (y/n)", name);
@@ -390,18 +398,14 @@ impl App {
             cursor_color,
         );
 
-        x_offset = ((width as i32 / 4) - x_offset).max(0) + x_offset + 8 * scale_i;
-
-        let right_padding = char_width;
-        let max_x = width as i32 - right_padding;
+        let mut x_offset = layout.results_x;
 
         let mut visible_count = 0;
-        let item_pad = char_width; // horizontal padding inside each result item
 
         for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
-            let item_width = self.measure_text(&app.name, font_size) + 2 * item_pad;
+            let item_width = self.measure_text(&app.name, font_size) + 2 * layout.item_pad;
 
-            if x_offset + item_width > max_x && visible_count > 0 {
+            if x_offset + item_width > layout.max_x && visible_count > 0 {
                 break;
             }
 
@@ -428,7 +432,7 @@ impl App {
                 &mut buffer,
                 width,
                 &app.name,
-                x_offset + item_pad,
+                x_offset + layout.item_pad,
                 baseline,
                 text_color,
                 &app.match_indices,
@@ -546,21 +550,34 @@ impl App {
         width
     }
 
+    /// Compute the shared layout parameters for the results area.
+    /// `scale` is 1.0 for physical pixels, 2.0 for supersampled rendering.
+    fn results_layout(&mut self, view_width: u16, scale: f32) -> ResultsLayout {
+        let scale_i = scale as i32;
+        let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
+        let font_size = self.config.appearance.font_size as f32 * dpi_scale * scale;
+        let char_width = self.measure_text("M", font_size);
+        let item_pad = char_width; // horizontal padding inside each result item
+        let x_start: i32 = 2 * scale_i;
+        let results_x = ((view_width as i32 / 4) - x_start).max(0) + x_start + 8 * scale_i;
+        let max_x = view_width as i32 - char_width; // right_padding = char_width
+        ResultsLayout {
+            font_size,
+            char_width,
+            item_pad,
+            results_x,
+            max_x,
+        }
+    }
+
     fn find_page_containing(
         &mut self,
         results: &[FilteredApp],
         target_idx: usize,
         screen_width: u16,
     ) -> usize {
-        let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
-        let font_size = self.config.appearance.font_size as f32 * dpi_scale;
-        let char_width = self.measure_text("M", font_size);
-        let x_start: i32 = 2;
-        let results_start_x = ((screen_width as i32 / 4) - x_start).max(0) + x_start + 8;
-        let right_padding = char_width;
-        let max_x = screen_width as i32 - right_padding;
-        let available_width = max_x - results_start_x;
-        let item_pad = char_width; // horizontal padding inside each result item
+        let layout = self.results_layout(screen_width, 1.0);
+        let available_width = layout.max_x - layout.results_x;
 
         let mut page_start = 0;
 
@@ -569,7 +586,7 @@ impl App {
             let mut page_end = page_start;
 
             for (i, result) in results.iter().enumerate().skip(page_start) {
-                let item_width = self.measure_text(&result.name, font_size) + 2 * item_pad;
+                let item_width = self.measure_text(&result.name, layout.font_size) + 2 * layout.item_pad;
                 if x + item_width > available_width {
                     break;
                 }
