@@ -327,7 +327,13 @@ impl App {
         let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
         let font_size = self.config.appearance.font_size as f32 * dpi_scale * scale;
         let scale_i = scale as i32;
-        let baseline = (((height as f32 - font_size) / 2.0) + font_size - 2.0 * scale) as i32;
+        let (line_ascent, line_height) =
+            if let Some(m) = self.font.horizontal_line_metrics(font_size) {
+                (m.ascent, m.ascent - m.descent)
+            } else {
+                (font_size * 0.8, font_size)
+            };
+        let baseline = ((height as f32 - line_height) / 2.0 + line_ascent) as i32;
         let char_width = self.measure_text("M", font_size);
         let mut x_offset: i32 = 2 * scale_i;
 
