@@ -376,9 +376,10 @@ impl App {
 
         let cursor_color = Rgb(192, 222, 255);
         let cursor_offset = self.measure_text(&text_before_cursor, font_size) - scale_i;
-        let cursor_x = text_start + cursor_offset;
-        let cursor_y = baseline - font_size as i32;
-        let cursor_height = (font_size * 1.4) as i32;
+        let cursor_x = (text_start + cursor_offset) / scale_i * scale_i;
+        let cursor_y = scale_i;
+        // Cursor spans full height minus 1px padding on top and bottom (after downscale)
+        let cursor_height = height as i32 - 2 * scale_i;
         self.fill_rect(
             &mut buffer,
             width,
@@ -395,11 +396,12 @@ impl App {
         let max_x = width as i32 - right_padding;
 
         let mut visible_count = 0;
+        let item_pad = char_width; // horizontal padding inside each result item
 
         for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
-            let text_width = self.measure_text(&app.name, font_size) + 14 * scale_i;
+            let item_width = self.measure_text(&app.name, font_size) + 2 * item_pad;
 
-            if x_offset + text_width > max_x && visible_count > 0 {
+            if x_offset + item_width > max_x && visible_count > 0 {
                 break;
             }
 
@@ -416,7 +418,7 @@ impl App {
                     width,
                     x_offset,
                     0,
-                    text_width,
+                    item_width,
                     height as i32,
                     bg_c,
                 );
@@ -426,14 +428,14 @@ impl App {
                 &mut buffer,
                 width,
                 &app.name,
-                x_offset + 6 * scale_i,
+                x_offset + item_pad,
                 baseline,
                 text_color,
                 &app.match_indices,
                 self.colors.match_hl,
                 font_size,
             );
-            x_offset += text_width;
+            x_offset += item_width;
 
             self.last_visible = i;
             visible_count += 1;
@@ -558,6 +560,7 @@ impl App {
         let right_padding = char_width;
         let max_x = screen_width as i32 - right_padding;
         let available_width = max_x - results_start_x;
+        let item_pad = char_width; // horizontal padding inside each result item
 
         let mut page_start = 0;
 
@@ -566,7 +569,7 @@ impl App {
             let mut page_end = page_start;
 
             for (i, result) in results.iter().enumerate().skip(page_start) {
-                let item_width = self.measure_text(&result.name, font_size) + 12;
+                let item_width = self.measure_text(&result.name, font_size) + 2 * item_pad;
                 if x + item_width > available_width {
                     break;
                 }
@@ -957,10 +960,10 @@ pub fn run(
     let visual = screen.root_visual;
 
     let monitor = get_active_monitor(&conn, root, screen.width_in_pixels, screen.height_in_pixels);
-    let win_x = monitor.x;
+    let mon_x = monitor.x;
     let mon_y = monitor.y;
+    let mon_width = monitor.width;
     let mon_height = monitor.height;
-    let width = monitor.width;
 
     let dpi_scale = config.appearance.dpi as f32 / 72.0;
 
@@ -1000,9 +1003,9 @@ pub fn run(
         depth,
         win_id,
         root,
-        win_x,
+        mon_x,
         win_y,
-        width,
+        mon_width,
         window_height,
         0,
         WindowClass::INPUT_OUTPUT,
@@ -1041,7 +1044,7 @@ pub fn run(
 
     let size_hints: [u32; 18] = [
         5,            // flags: USPosition | PPosition
-        win_x as u32, // x
+        mon_x as u32, // x
         win_y as u32, // y
         0,
         0,
@@ -1163,8 +1166,8 @@ pub fn run(
                     0,
                     0,
                     0,
-                    win_x as u32,
-                    (win_x as u32) + (width as u32) - 1,
+                    mon_x as u32,
+                    (mon_x as u32) + (mon_width as u32) - 1,
                 ],
             )?;
         }
@@ -1194,8 +1197,8 @@ pub fn run(
                     0,
                     0,
                     0,
-                    win_x as u32,
-                    (win_x as u32) + (width as u32) - 1,
+                    mon_x as u32,
+                    (mon_x as u32) + (mon_width as u32) - 1,
                     0,
                     0,
                 ],
@@ -1220,14 +1223,14 @@ pub fn run(
     let utf8_string = conn.intern_atom(false, b"UTF8_STRING")?.reply()?.atom;
     let paste_target = conn.intern_atom(false, b"CTRL_SPACE_PASTE")?.reply()?.atom;
 
-    let mut app = App::new(config, frequency, apps, keymap, width, font);
+    let mut app = App::new(config, frequency, apps, keymap, mon_width, font);
 
     let mut ctx = X11Context {
         conn,
         win_id,
         gc_id,
         depth,
-        current_width: width,
+        current_width: mon_width,
         current_height: window_height,
     };
 
