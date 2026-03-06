@@ -41,12 +41,12 @@ pub struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            foreground: "#F8F8F2".to_string(),
-            background: "#21222C".to_string(),
-            selection_fg: "#F8F8F2".to_string(),
-            selection_bg: "#6272A4".to_string(),
+            foreground: "#f8f8f2".to_string(),
+            background: "#21222c".to_string(),
+            selection_fg: "#f8f8f2".to_string(),
+            selection_bg: "#6272a4".to_string(),
             match_highlight: "#8be9fd".to_string(),
-            prompt_color: "#BD93F9".to_string(),
+            prompt_color: "#bd93f9".to_string(),
             font_family: "Monospace".to_string(),
             font_size: 10,
             dpi: 96,

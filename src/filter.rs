@@ -116,25 +116,28 @@ fn match_fragmented(
 
     let mut total_score: i64 = 0;
     let mut all_indices: Vec<usize> = vec![];
-    let mut search_start: usize = 0;
+    let mut search_start: usize = 0; // char index
 
     for token in tokens {
         if token.is_empty() {
             continue;
         }
 
-        let remaining = &name[search_start..];
+        // Convert char offset to byte offset for slicing
+        let search_start_byte = name
+            .char_indices()
+            .nth(search_start)
+            .map(|(i, _)| i)
+            .unwrap_or(name.len());
+
+        let remaining = &name[search_start_byte..];
         if let Some((score, indices)) =
             fuzzy_match_token(remaining, token, search_start, case_sensitive)
         {
             total_score += score;
             if let Some(&last_idx) = indices.last() {
-                let char_end = name[..=last_idx].chars().count();
-                search_start = name
-                    .char_indices()
-                    .nth(char_end)
-                    .map(|(i, _)| i)
-                    .unwrap_or(name.len());
+                // last_idx is a char index, move past it
+                search_start = last_idx + 1;
             }
             all_indices.extend(indices);
         } else {

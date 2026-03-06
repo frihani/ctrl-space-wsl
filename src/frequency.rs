@@ -14,6 +14,16 @@ pub struct Frequency {
     dirty: Arc<AtomicBool>,
 }
 
+impl Default for Frequency {
+    fn default() -> Self {
+        Self {
+            counts: HashMap::new(),
+            path: data_path(),
+            dirty: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
 impl Frequency {
     pub fn load() -> Self {
         let path = data_path();
@@ -106,7 +116,7 @@ impl Frequency {
                 counts.entry(app.clone()).or_insert(0);
             }
 
-            // Only rewrite if new apps are discovered
+            // Only rewrite if we discover new apps
             if !has_new {
                 dirty.store(true, Ordering::Relaxed);
                 return;
