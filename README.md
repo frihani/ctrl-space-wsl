@@ -10,6 +10,7 @@ A fast application launcher for WSL2, inspired by dmenu/yeganesh.
 - Frequency-based sorting
 - Cached app list for fast startup
 - Single instance
+- Stdin filter mode (pipe in any list, select with fuzzy search)
 
 ## Installation
 
@@ -33,23 +34,6 @@ cargo build --release
 cp target/release/ctrl-space-wsl ~/.local/bin/
 ```
 
-### Backends
-
-Two backends are available:
-
-- **x11** (default) - Lightweight, minimal dependencies
-- **sdl2** - Uses egui/SDL2 for rendering (requires `libsdl2-dev`)
-
-```bash
-# Build with X11 backend (default)
-cargo build --release
-
-# Build with SDL2 backend (requires libsdl2-dev)
-# Debian/Ubuntu: sudo apt install libsdl2-dev
-# Fedora: sudo dnf install SDL2-devel
-cargo build --release --no-default-features --features sdl2-backend
-```
-
 Ensure `~/.local/bin` is in your PATH.
 
 ## Usage
@@ -57,6 +41,33 @@ Ensure `~/.local/bin` is in your PATH.
 ```bash
 ctrl-space-wsl --info         # Show version and file paths
 ctrl-space-wsl --init-config  # Create default config file
+```
+
+## Usage as a filter
+
+Pipe any list into ctrl-space-wsl to use it as a general-purpose selector. Your selection gets printed to stdout (not launched), and the program disables frequency tracking.
+
+```bash
+# Select a file from a directory
+ls | ctrl-space-wsl
+
+# Git branch switcher
+git branch | ctrl-space-wsl | xargs git checkout
+
+# Search git commits
+git log --oneline | ctrl-space-wsl | awk '{print $1}' | xargs git show
+
+# Process killer
+ps aux | ctrl-space-wsl | awk '{print $2}' | xargs kill
+
+# Open a recent file
+find . -type f -name "*.rs" | ctrl-space-wsl | xargs code
+
+# Search environment variables
+printenv | ctrl-space-wsl
+
+# Look through installed fonts
+fc-list : family | sort -u | ctrl-space-wsl
 ```
 
 ## Global Hotkey (PowerToys)

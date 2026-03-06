@@ -8,6 +8,7 @@ mod lock;
 mod ui;
 
 use std::env;
+use std::io::{self, BufRead, IsTerminal};
 
 use config::Config;
 use frequency::Frequency;
@@ -61,19 +62,32 @@ fn main() {
         }
     }
 
-    kill_others();
+    // Check for stdin filter mode (piped input)
+    let filter_mode = !io::stdin().is_terminal();
 
     let config = Config::load();
-    let frequency = Frequency::load();
 
-    let apps = if frequency.is_empty() {
-        app_discovery::discover_apps()
+    let (frequency, apps) = if filter_mode {
+        let items: Vec<String> = io::stdin()
+            .lock()
+            .lines()
+            .map_while(Result::ok)
+            .filter(|l| !l.is_empty())
+            .collect();
+        (Frequency::default(), items)
     } else {
-        frequency.refresh_in_background();
-        frequency.apps()
+        kill_others();
+        let freq = Frequency::load();
+        let apps = if freq.is_empty() {
+            app_discovery::discover_apps()
+        } else {
+            freq.refresh_in_background();
+            freq.apps()
+        };
+        (freq, apps)
     };
 
-    if let Err(e) = ui::run(config, frequency, apps) {
+    if let Err(e) = ui::run(config, frequency, apps, filter_mode) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }

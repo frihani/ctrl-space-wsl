@@ -152,6 +152,8 @@ struct App {
     screen_width: u16,
     undo_stack: Vec<UndoState>,
     redo_stack: Vec<UndoState>,
+    filter_mode: bool,
+    filter_result: Option<String>,
 }
 
 fn resolve_font_path(font_family: &str) -> Option<String> {
@@ -244,6 +246,7 @@ impl App {
         keymap: KeyboardMap,
         screen_width: u16,
         font: Font,
+        filter_mode: bool,
     ) -> Self {
         let colors = CachedColors {
             bg: parse_hex_color(&config.appearance.background).unwrap_or(Rgb(33, 34, 44)),
@@ -274,6 +277,8 @@ impl App {
             screen_width,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            filter_mode,
+            filter_result: None,
         }
     }
 
@@ -586,7 +591,8 @@ impl App {
             let mut page_end = page_start;
 
             for (i, result) in results.iter().enumerate().skip(page_start) {
-                let item_width = self.measure_text(&result.name, layout.font_size) + 2 * layout.item_pad;
+                let item_width =
+                    self.measure_text(&result.name, layout.font_size) + 2 * layout.item_pad;
                 if x + item_width > available_width {
                     break;
                 }
@@ -605,7 +611,7 @@ impl App {
     }
 
     fn launch_selected(&mut self, results: &[FilteredApp], use_terminal: bool) -> Option<bool> {
-        let command = if let Some(app) = results.get(self.selected) {
+        let selection = if let Some(app) = results.get(self.selected) {
             app.name.clone()
         } else if !self.query.trim().is_empty() {
             self.query.clone()
@@ -613,7 +619,13 @@ impl App {
             return Some(true);
         };
 
-        let result = launcher::launch_command(&command, use_terminal, &self.config);
+        // In filter mode, store result for printing at exit
+        if self.filter_mode {
+            self.filter_result = Some(selection);
+            return Some(true);
+        }
+
+        let result = launcher::launch_command(&selection, use_terminal, &self.config);
         if result.success && !result.command.is_empty() {
             self.frequency.increment(&result.command);
             let _ = self.frequency.save();
@@ -968,6 +980,7 @@ pub fn run(
     config: Config,
     frequency: Frequency,
     apps: Vec<String>,
+    filter_mode: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (conn, screen_num) = x11rb::connect(None)?;
     let setup = conn.setup();
@@ -1240,7 +1253,15 @@ pub fn run(
     let utf8_string = conn.intern_atom(false, b"UTF8_STRING")?.reply()?.atom;
     let paste_target = conn.intern_atom(false, b"CTRL_SPACE_PASTE")?.reply()?.atom;
 
-    let mut app = App::new(config, frequency, apps, keymap, mon_width, font);
+    let mut app = App::new(
+        config,
+        frequency,
+        apps,
+        keymap,
+        mon_width,
+        font,
+        filter_mode,
+    );
 
     let mut ctx = X11Context {
         conn,
@@ -1381,6 +1402,10 @@ pub fn run(
 
     ctx.conn.ungrab_keyboard(x11rb::CURRENT_TIME)?;
     ctx.conn.flush()?;
+
+    if let Some(selection) = app.filter_result {
+        println!("{}", selection);
+    }
 
     Ok(())
 }
