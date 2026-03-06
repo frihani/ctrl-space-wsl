@@ -82,12 +82,12 @@ Config file: `~/.config/ctrl-space-wsl/config.toml`
 
 ```toml
 [appearance]
-foreground = "#F8F8F2"
-background = "#21222C"
-selection_fg = "#F8F8F2"
-selection_bg = "#6272A4"
+foreground = "#f8f8f2"
+background = "#21222c"
+selection_fg = "#f8f8f2"
+selection_bg = "#6272a4"
 match_highlight = "#8be9fd"
-prompt_color = "#BD93F9"
+prompt_color = "#bd93f9"
 font_family = "Monospace"
 font_size = 10
 dpi = 96
@@ -95,7 +95,7 @@ position = "top"  # "top", "center", or "bottom"
 
 [launcher]
 terminal = "x-terminal-emulator -e"  # Linux default
-# terminal = "alacritty.exe -e wsl.exe"      # WSLg from Windows
+# terminal = "alacritty.exe -e wsl.exe"      # WSLg from Windows with alacritty terminal
 ```
 
 ## License
