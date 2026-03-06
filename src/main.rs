@@ -18,7 +18,6 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 fn print_info() {
     let dir = config::config_dir();
 
-
     println!("ctrl-space-wsl \n");
     println!("Version:          v{}", VERSION);
     println!("Config:           {}", dir.join("config.toml").display());

@@ -35,6 +35,7 @@ pub struct Appearance {
     pub font_family: String,
     pub font_size: u8,
     pub dpi: u16,
+    pub position: String,
 }
 
 impl Default for Appearance {
@@ -49,6 +50,7 @@ impl Default for Appearance {
             font_family: "Monospace".to_string(),
             font_size: 10,
             dpi: 96,
+            position: "top".to_string(),
         }
     }
 }

@@ -228,6 +228,14 @@ fn downscale(src: &[u8], src_width: u16, src_height: u16, scale: u16) -> Vec<u8>
     dst
 }
 
+struct ResultsLayout {
+    font_size: f32,
+    char_width: i32,
+    item_pad: i32,
+    results_x: i32,
+    max_x: i32,
+}
+
 impl App {
     fn new(
         config: Config,
@@ -324,12 +332,18 @@ impl App {
             pixel[3] = 255;
         }
 
-        let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
-        let font_size = self.config.appearance.font_size as f32 * dpi_scale * scale;
+        let layout = self.results_layout(width, scale);
+        let font_size = layout.font_size;
+        let char_width = layout.char_width;
         let scale_i = scale as i32;
-        let baseline = (((height as f32 - font_size) / 2.0) + font_size - 2.0 * scale) as i32;
-        let char_width = self.measure_text("M", font_size);
-        let mut x_offset: i32 = 2 * scale_i;
+        let (line_ascent, line_height) =
+            if let Some(m) = self.font.horizontal_line_metrics(font_size) {
+                (m.ascent, m.ascent - m.descent)
+            } else {
+                (font_size * 0.8, font_size)
+            };
+        let baseline = ((height as f32 - line_height) / 2.0 + line_ascent) as i32;
+        let x_offset: i32 = 2 * scale_i;
 
         if let Some(ref name) = self.delete_confirm {
             let prompt = format!("Delete '{}'? (y/n)", name);
@@ -370,9 +384,10 @@ impl App {
 
         let cursor_color = Rgb(192, 222, 255);
         let cursor_offset = self.measure_text(&text_before_cursor, font_size) - scale_i;
-        let cursor_x = text_start + cursor_offset;
-        let cursor_y = baseline - font_size as i32;
-        let cursor_height = (font_size * 1.4) as i32;
+        let cursor_x = (text_start + cursor_offset) / scale_i * scale_i;
+        let cursor_y = scale_i;
+        // Cursor spans full height minus 1px padding on top and bottom (after downscale)
+        let cursor_height = height as i32 - 2 * scale_i;
         self.fill_rect(
             &mut buffer,
             width,
@@ -383,17 +398,14 @@ impl App {
             cursor_color,
         );
 
-        x_offset = ((width as i32 / 4) - x_offset).max(0) + x_offset + 8 * scale_i;
-
-        let right_padding = char_width;
-        let max_x = width as i32 - right_padding;
+        let mut x_offset = layout.results_x;
 
         let mut visible_count = 0;
 
         for (i, app) in results.iter().enumerate().skip(self.scroll_offset) {
-            let text_width = self.measure_text(&app.name, font_size) + 14 * scale_i;
+            let item_width = self.measure_text(&app.name, font_size) + 2 * layout.item_pad;
 
-            if x_offset + text_width > max_x && visible_count > 0 {
+            if x_offset + item_width > layout.max_x && visible_count > 0 {
                 break;
             }
 
@@ -410,7 +422,7 @@ impl App {
                     width,
                     x_offset,
                     0,
-                    text_width,
+                    item_width,
                     height as i32,
                     bg_c,
                 );
@@ -420,14 +432,14 @@ impl App {
                 &mut buffer,
                 width,
                 &app.name,
-                x_offset + 6 * scale_i,
+                x_offset + layout.item_pad,
                 baseline,
                 text_color,
                 &app.match_indices,
                 self.colors.match_hl,
                 font_size,
             );
-            x_offset += text_width;
+            x_offset += item_width;
 
             self.last_visible = i;
             visible_count += 1;
@@ -538,20 +550,34 @@ impl App {
         width
     }
 
+    /// Compute the shared layout parameters for the results area.
+    /// `scale` is 1.0 for physical pixels, 2.0 for supersampled rendering.
+    fn results_layout(&mut self, view_width: u16, scale: f32) -> ResultsLayout {
+        let scale_i = scale as i32;
+        let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
+        let font_size = self.config.appearance.font_size as f32 * dpi_scale * scale;
+        let char_width = self.measure_text("M", font_size);
+        let item_pad = char_width; // horizontal padding inside each result item
+        let x_start: i32 = 2 * scale_i;
+        let results_x = ((view_width as i32 / 4) - x_start).max(0) + x_start + 8 * scale_i;
+        let max_x = view_width as i32 - char_width; // right_padding = char_width
+        ResultsLayout {
+            font_size,
+            char_width,
+            item_pad,
+            results_x,
+            max_x,
+        }
+    }
+
     fn find_page_containing(
         &mut self,
         results: &[FilteredApp],
         target_idx: usize,
         screen_width: u16,
     ) -> usize {
-        let dpi_scale = self.config.appearance.dpi as f32 / 72.0;
-        let font_size = self.config.appearance.font_size as f32 * dpi_scale;
-        let char_width = self.measure_text("M", font_size);
-        let x_start: i32 = 2;
-        let results_start_x = ((screen_width as i32 / 4) - x_start).max(0) + x_start + 8;
-        let right_padding = char_width;
-        let max_x = screen_width as i32 - right_padding;
-        let available_width = max_x - results_start_x;
+        let layout = self.results_layout(screen_width, 1.0);
+        let available_width = layout.max_x - layout.results_x;
 
         let mut page_start = 0;
 
@@ -560,7 +586,7 @@ impl App {
             let mut page_end = page_start;
 
             for (i, result) in results.iter().enumerate().skip(page_start) {
-                let item_width = self.measure_text(&result.name, font_size) + 12;
+                let item_width = self.measure_text(&result.name, layout.font_size) + 2 * layout.item_pad;
                 if x + item_width > available_width {
                     break;
                 }
@@ -845,15 +871,22 @@ struct MonitorGeometry {
     x: i16,
     y: i16,
     width: u16,
+    height: u16,
 }
 
 /// Detect the monitor containing the currently focused window using RandR.
 /// Falls back to full screen width at (0, 0) if anything fails.
-fn get_active_monitor(conn: &impl Connection, root: Window, screen_width: u16) -> MonitorGeometry {
+fn get_active_monitor(
+    conn: &impl Connection,
+    root: Window,
+    screen_width: u16,
+    screen_height: u16,
+) -> MonitorGeometry {
     let fallback = MonitorGeometry {
         x: 0,
         y: 0,
         width: screen_width,
+        height: screen_height,
     };
 
     // Get the currently focused window
@@ -913,6 +946,7 @@ fn get_active_monitor(conn: &impl Connection, root: Window, screen_width: u16) -
                 x: info.x,
                 y: info.y,
                 width: info.width,
+                height: info.height,
             };
         }
 
@@ -922,6 +956,7 @@ fn get_active_monitor(conn: &impl Connection, root: Window, screen_width: u16) -
                 x: info.x,
                 y: info.y,
                 width: info.width,
+                height: info.height,
             });
         }
     }
@@ -941,10 +976,11 @@ pub fn run(
     let depth = screen.root_depth;
     let visual = screen.root_visual;
 
-    let monitor = get_active_monitor(&conn, root, screen.width_in_pixels);
+    let monitor = get_active_monitor(&conn, root, screen.width_in_pixels, screen.height_in_pixels);
     let mon_x = monitor.x;
     let mon_y = monitor.y;
-    let width = monitor.width;
+    let mon_width = monitor.width;
+    let mon_height = monitor.height;
 
     let dpi_scale = config.appearance.dpi as f32 / 72.0;
 
@@ -952,6 +988,12 @@ pub fn run(
         .unwrap_or_else(|| panic!("Font '{}' not found", config.appearance.font_family));
     let font_size = config.appearance.font_size as f32 * dpi_scale;
     let window_height = compute_window_height(&font, font_size);
+
+    let win_y: i16 = match config.appearance.position.as_str() {
+        "bottom" => mon_y + mon_height as i16 - window_height as i16,
+        "center" => mon_y + (mon_height as i16 - window_height as i16) / 2,
+        _ => mon_y, // "top" (default)
+    };
 
     let keymap = KeyboardMap::new(&conn, setup)?;
 
@@ -979,8 +1021,8 @@ pub fn run(
         win_id,
         root,
         mon_x,
-        mon_y,
-        width,
+        win_y,
+        mon_width,
         window_height,
         0,
         WindowClass::INPUT_OUTPUT,
@@ -1020,7 +1062,7 @@ pub fn run(
     let size_hints: [u32; 18] = [
         5,            // flags: USPosition | PPosition
         mon_x as u32, // x
-        mon_y as u32, // y
+        win_y as u32, // y
         0,
         0,
         0,
@@ -1109,38 +1151,77 @@ pub fn run(
     )?;
 
     let net_wm_strut = conn.intern_atom(false, b"_NET_WM_STRUT")?.reply()?.atom;
-    conn.change_property32(
-        PropMode::REPLACE,
-        win_id,
-        net_wm_strut,
-        AtomEnum::CARDINAL,
-        &[0, 0, (mon_y as u32) + (window_height as u32), 0],
-    )?;
-
     let net_wm_strut_partial = conn
         .intern_atom(false, b"_NET_WM_STRUT_PARTIAL")?
         .reply()?
         .atom;
-    conn.change_property32(
-        PropMode::REPLACE,
-        win_id,
-        net_wm_strut_partial,
-        AtomEnum::CARDINAL,
-        &[
-            0,
-            0,
-            (mon_y as u32) + (window_height as u32),
-            0,
-            0,
-            0,
-            0,
-            0,
-            mon_x as u32,
-            (mon_x as u32) + (width as u32) - 1,
-            0,
-            0,
-        ],
-    )?;
+
+    let position = config.appearance.position.as_str();
+    match position {
+        "bottom" => {
+            let bottom_reserve = (screen.height_in_pixels as u32) - (win_y as u32);
+            conn.change_property32(
+                PropMode::REPLACE,
+                win_id,
+                net_wm_strut,
+                AtomEnum::CARDINAL,
+                &[0, 0, 0, bottom_reserve],
+            )?;
+            conn.change_property32(
+                PropMode::REPLACE,
+                win_id,
+                net_wm_strut_partial,
+                AtomEnum::CARDINAL,
+                &[
+                    0,
+                    0,
+                    0,
+                    bottom_reserve,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    mon_x as u32,
+                    (mon_x as u32) + (mon_width as u32) - 1,
+                ],
+            )?;
+        }
+        "center" => {
+            // No strut reservation for centered position
+        }
+        _ => {
+            // "top" (default)
+            conn.change_property32(
+                PropMode::REPLACE,
+                win_id,
+                net_wm_strut,
+                AtomEnum::CARDINAL,
+                &[0, 0, (win_y as u32) + (window_height as u32), 0],
+            )?;
+            conn.change_property32(
+                PropMode::REPLACE,
+                win_id,
+                net_wm_strut_partial,
+                AtomEnum::CARDINAL,
+                &[
+                    0,
+                    0,
+                    (win_y as u32) + (window_height as u32),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    mon_x as u32,
+                    (mon_x as u32) + (mon_width as u32) - 1,
+                    0,
+                    0,
+                ],
+            )?;
+        }
+    }
 
     let wm_hints: [u32; 9] = [
         1, // flags: InputHint
@@ -1159,14 +1240,14 @@ pub fn run(
     let utf8_string = conn.intern_atom(false, b"UTF8_STRING")?.reply()?.atom;
     let paste_target = conn.intern_atom(false, b"CTRL_SPACE_PASTE")?.reply()?.atom;
 
-    let mut app = App::new(config, frequency, apps, keymap, width, font);
+    let mut app = App::new(config, frequency, apps, keymap, mon_width, font);
 
     let mut ctx = X11Context {
         conn,
         win_id,
         gc_id,
         depth,
-        current_width: width,
+        current_width: mon_width,
         current_height: window_height,
     };
 
