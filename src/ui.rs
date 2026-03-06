@@ -591,7 +591,8 @@ impl App {
             let mut page_end = page_start;
 
             for (i, result) in results.iter().enumerate().skip(page_start) {
-                let item_width = self.measure_text(&result.name, layout.font_size) + 2 * layout.item_pad;
+                let item_width =
+                    self.measure_text(&result.name, layout.font_size) + 2 * layout.item_pad;
                 if x + item_width > available_width {
                     break;
                 }
@@ -1252,7 +1253,15 @@ pub fn run(
     let utf8_string = conn.intern_atom(false, b"UTF8_STRING")?.reply()?.atom;
     let paste_target = conn.intern_atom(false, b"CTRL_SPACE_PASTE")?.reply()?.atom;
 
-    let mut app = App::new(config, frequency, apps, keymap, mon_width, font);
+    let mut app = App::new(
+        config,
+        frequency,
+        apps,
+        keymap,
+        mon_width,
+        font,
+        filter_mode,
+    );
 
     let mut ctx = X11Context {
         conn,

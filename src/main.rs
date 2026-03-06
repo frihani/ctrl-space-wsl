@@ -62,19 +62,25 @@ fn main() {
         }
     }
 
-    // Check for stdin filter mode (piped input)
-    let filter_mode = !io::stdin().is_terminal();
-
-    let config = Config::load();
-
-    let (frequency, apps) = if filter_mode {
-        let items: Vec<String> = io::stdin()
+    // Read from stdin if it's not a terminal (piped)
+    let stdin_items: Vec<String> = if !io::stdin().is_terminal() {
+        io::stdin()
             .lock()
             .lines()
             .map_while(Result::ok)
             .filter(|l| !l.is_empty())
-            .collect();
-        (Frequency::default(), items)
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    // Filter mode only if we actually received piped content
+    let filter_mode = !stdin_items.is_empty();
+
+    let config = Config::load();
+
+    let (frequency, apps) = if filter_mode {
+        (Frequency::default(), stdin_items)
     } else {
         kill_others();
         let freq = Frequency::load();
