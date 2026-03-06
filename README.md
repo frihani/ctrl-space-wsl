@@ -43,33 +43,6 @@ ctrl-space-wsl --info         # Show version and file paths
 ctrl-space-wsl --init-config  # Create default config file
 ```
 
-## Usage as a filter
-
-Pipe any list into ctrl-space-wsl to use it as a general-purpose selector. Your selection gets printed to stdout (not launched), and the program disables frequency tracking.
-
-```bash
-# Select a file from a directory
-ls | ctrl-space-wsl
-
-# Git branch switcher
-git branch | ctrl-space-wsl | xargs git checkout
-
-# Search git commits
-git log --oneline | ctrl-space-wsl | awk '{print $1}' | xargs git show
-
-# Process killer
-ps aux | ctrl-space-wsl | awk '{print $2}' | xargs kill
-
-# Open a recent file
-find . -type f -name "*.rs" | ctrl-space-wsl | xargs code
-
-# Search environment variables
-printenv | ctrl-space-wsl
-
-# Look through installed fonts
-fc-list : family | sort -u | ctrl-space-wsl
-```
-
 ## Global Hotkey (PowerToys)
 
 1. Open **PowerToys** → **Keyboard Manager** → **Remap a shortcut**
@@ -107,6 +80,33 @@ position = "top"  # "top", "center", or "bottom"
 [launcher]
 terminal = "x-terminal-emulator -e"  # Linux default
 # terminal = "alacritty.exe -e wsl.exe"      # WSLg from Windows with alacritty terminal
+```
+
+## Usage as a filter
+
+Pipe any list into ctrl-space-wsl to use it as a general-purpose selector. Your selection gets printed to stdout (not launched), and the program disables frequency tracking.
+
+```bash
+# Select a file from a directory
+ls | ctrl-space-wsl
+
+# Git branch switcher
+git branch | ctrl-space-wsl | xargs git checkout
+
+# Search git commits
+git log --oneline | ctrl-space-wsl | awk '{print $1}' | xargs git show
+
+# Process killer
+ps aux | ctrl-space-wsl | awk '{print $2}' | xargs kill
+
+# Open a recent file
+find . -type f -name "*.rs" | ctrl-space-wsl | xargs code
+
+# Search environment variables
+printenv | ctrl-space-wsl
+
+# Look through installed fonts
+fc-list : family | sort -u | ctrl-space-wsl
 ```
 
 ## License
