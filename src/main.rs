@@ -9,12 +9,28 @@ mod ui;
 
 use std::env;
 use std::io::{self, BufRead, IsTerminal};
+use std::os::unix::io::AsRawFd;
 
 use config::Config;
 use frequency::Frequency;
 use lock::kill_others;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Check if stdin has data available without blocking.
+/// Uses poll() with zero timeout to check if stdin is ready for reading.
+fn stdin_has_data() -> bool {
+    use std::io::stdin;
+    let fd = stdin().as_raw_fd();
+    let mut pollfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // Poll with 0 timeout = non-blocking check
+    let ret = unsafe { libc::poll(&mut pollfd, 1, 0) };
+    ret > 0 && (pollfd.revents & libc::POLLIN) != 0
+}
 
 fn print_info() {
     let dir = config::config_dir();
@@ -62,8 +78,10 @@ fn main() {
         }
     }
 
-    // Read from stdin if it's not a terminal (piped)
-    let stdin_items: Vec<String> = if !io::stdin().is_terminal() {
+    // Read from stdin if it's not a terminal (piped) AND stdin has data available.
+    // When launched via wslg.exe, stdin is not a terminal but also has no data,
+    // so we'd block forever waiting for EOF. Check if stdin is ready first.
+    let stdin_items: Vec<String> = if !io::stdin().is_terminal() && stdin_has_data() {
         io::stdin()
             .lock()
             .lines()
